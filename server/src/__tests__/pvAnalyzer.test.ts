@@ -170,15 +170,21 @@ describe('PvAnalyzer - Semantic Tokens', () => {
     expect(tokens[0].tokenType).toBe(2);
   });
 
-  it('emits two tokens for class PVs (type + name)', () => {
+  it('emits three tokens for class PVs: $var( as type, name as name, ) as type', () => {
     const analyzer = makeAnalyzer();
     const code = 'KSR.pv.sets("$var(caller)", "alice")';
     const tree = analyzeCode(analyzer, 'test://a.py', code);
     const tokens = analyzer.getSemanticTokens({ uri: 'test://a.py', tree, fullText: code });
-    // Should have at least 2 tokens: $var( and caller
-    expect(tokens.length).toBeGreaterThanOrEqual(2);
-    expect(tokens[0].tokenType).toBe(0); // pvType
-    expect(tokens[1].tokenType).toBe(1); // pvName
+    expect(tokens).toHaveLength(3);
+    // $var( → pvType (teal)
+    expect(tokens[0].tokenType).toBe(0);
+    expect(tokens[0].length).toBe(5); // $var(
+    // caller → pvName (light blue)
+    expect(tokens[1].tokenType).toBe(1);
+    expect(tokens[1].length).toBe(6); // caller
+    // ) → pvType (teal)
+    expect(tokens[2].tokenType).toBe(0);
+    expect(tokens[2].length).toBe(1);
   });
 });
 

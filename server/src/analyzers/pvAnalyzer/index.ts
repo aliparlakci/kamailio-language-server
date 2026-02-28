@@ -105,13 +105,20 @@ export class PvAnalyzer implements Analyzer {
           tokenModifiers: 0,
         });
         if (occ.pv.innerName) {
-          // Include closing ) in the name token so it doesn't fall back to string color
           tokens.push({
             line: occ.range.startPosition.row,
             char: occ.range.startPosition.column + classLen,
-            length: occ.pv.innerName.length + 1, // +1 for )
+            length: occ.pv.innerName.length,
             tokenType: TOKEN_TYPE_PV_NAME,
             tokenModifiers: occ.isWrite ? MODIFIER_WRITE : 0,
+          });
+          // Closing ) in same color as $var(
+          tokens.push({
+            line: occ.range.startPosition.row,
+            char: occ.range.startPosition.column + classLen + occ.pv.innerName.length,
+            length: 1,
+            tokenType: TOKEN_TYPE_PV_TYPE,
+            tokenModifiers: 0,
           });
         }
       }
