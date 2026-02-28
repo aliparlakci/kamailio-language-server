@@ -61,6 +61,7 @@ export class CallGraphAnalyzer implements Analyzer {
   private callbacksByFile: Map<string, CallbackReference[]> = new Map();
   private htablesByFile: Map<string, HtableReference[]> = new Map();
   private hdrsByFile: Map<string, HdrReference[]> = new Map();
+  private constantsByFile: Map<string, StringConstants> = new Map();
 
   constructor(
     private getWorkspaceRoots: () => string[],
@@ -106,19 +107,22 @@ export class CallGraphAnalyzer implements Analyzer {
       }
     }
 
-    // Resolve simple string constants (NAME = "value") for use in extraction
-    const constants = extractStringConstants(tree);
+    // Resolve simple string constants (NAME = "value") for use in extraction.
+    // Store per-file, then merge all files so cross-file constants are resolved.
+    const localConstants = extractStringConstants(tree);
+    this.constantsByFile.set(uri, localConstants);
+    const allConstants = this.getAllConstants();
 
     // Extract callback registrations (KSR.tm.t_on_failure/t_on_branch)
-    const callbacks = extractCallbackRegistrations(tree, constants);
+    const callbacks = extractCallbackRegistrations(tree, allConstants);
     this.callbacksByFile.set(uri, callbacks);
 
     // Extract htable references (KSR.htable.sht_*)
-    const htables = extractHtableReferences(tree, constants);
+    const htables = extractHtableReferences(tree, allConstants);
     this.htablesByFile.set(uri, htables);
 
     // Extract header references (KSR.hdr.*)
-    const hdrs = extractHdrReferences(tree, constants);
+    const hdrs = extractHdrReferences(tree, allConstants);
     this.hdrsByFile.set(uri, hdrs);
   }
 
@@ -327,11 +331,22 @@ export class CallGraphAnalyzer implements Analyzer {
     this.callbacksByFile.delete(uri);
     this.htablesByFile.delete(uri);
     this.hdrsByFile.delete(uri);
+    this.constantsByFile.delete(uri);
   }
 
   // --- Public API for PvAnalyzer ---
 
   getCallGraph(): CallGraph { return this.callGraph; }
+
+  private getAllConstants(): StringConstants {
+    const merged: StringConstants = new Map();
+    for (const constants of this.constantsByFile.values()) {
+      for (const [name, value] of constants) {
+        merged.set(name, value);
+      }
+    }
+    return merged;
+  }
 
   // --- Private helpers ---
 

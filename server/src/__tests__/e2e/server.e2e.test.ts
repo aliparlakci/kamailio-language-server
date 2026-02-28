@@ -761,4 +761,100 @@ describe('E2E: SIP header completions', () => {
     const items = await client.getCompletions(uri2, 0, 20);
     expect(items.some(c => c.label === 'MyTable')).toBe(true);
   });
+
+  it('resolves constants defined in a different file', async () => {
+    const defUri = 'file:///test/const_cross_def.py';
+    const useUri = 'file:///test/const_cross_use.py';
+    // File A defines the constant
+    await client.openDocument(defUri, 'CROSS_HEADER = "X-Cross-File"');
+    // File B uses it — constant should resolve from file A
+    await client.openDocument(useUri, 'KSR.hdr.get(CROSS_HEADER)');
+    // The resolved header should appear in completions elsewhere
+    const compUri = 'file:///test/const_cross_comp.py';
+    await client.openDocument(compUri, 'KSR.hdr.get("")');
+    const items = await client.getCompletions(compUri, 0, 13);
+    expect(items.some(c => c.label === 'X-Cross-File')).toBe(true);
+  });
+});
+
+describe('E2E: Extra Python paths', () => {
+  let epClient: TestLspClient;
+  let tmpWorkspace: string;
+  let tmpExtraPath: string;
+  let tmpPthTarget: string;
+
+  beforeAll(async () => {
+    // Create workspace dir
+    tmpWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'kemi-ep-ws-'));
+
+    // Main file that imports from an external package
+    fs.writeFileSync(path.join(tmpWorkspace, 'main.py'), [
+      'from ext_package import helper',
+      '',
+      'def ksr_request_route(msg):',
+      '    helper.setup()',
+      '    val = KSR.pv.get("$var(ext_defined)")',
+    ].join('\n'));
+
+    // Create extra path with a module
+    tmpExtraPath = fs.mkdtempSync(path.join(os.tmpdir(), 'kemi-ep-extra-'));
+    const pkgDir = path.join(tmpExtraPath, 'ext_package');
+    fs.mkdirSync(pkgDir);
+    fs.writeFileSync(path.join(pkgDir, '__init__.py'), '');
+    fs.writeFileSync(path.join(pkgDir, 'helper.py'), [
+      'def setup():',
+      '    KSR.pv.sets("$var(ext_defined)", "val")',
+    ].join('\n'));
+
+    // Create a site-packages dir with a .pth file pointing to another location
+    const tmpSitePackages = fs.mkdtempSync(path.join(os.tmpdir(), 'kemi-ep-site-'));
+    tmpPthTarget = fs.mkdtempSync(path.join(os.tmpdir(), 'kemi-ep-pth-'));
+    const pthPkgDir = path.join(tmpPthTarget, 'pth_package');
+    fs.mkdirSync(pthPkgDir);
+    fs.writeFileSync(path.join(pthPkgDir, '__init__.py'), '');
+    fs.writeFileSync(path.join(pthPkgDir, 'utils.py'), [
+      'def pth_helper():',
+      '    KSR.pv.sets("$var(pth_var)", "from_pth")',
+    ].join('\n'));
+    fs.writeFileSync(path.join(tmpSitePackages, 'mylib.pth'), tmpPthTarget + '\n');
+
+    epClient = await TestLspClient.start(
+      [{ uri: 'file://' + tmpWorkspace, name: 'test-ep' }],
+      { extraPaths: [tmpExtraPath, tmpSitePackages] }
+    );
+
+    await new Promise(r => setTimeout(r, 500));
+  }, 15000);
+
+  afterAll(async () => {
+    await epClient.shutdown();
+    fs.rmSync(tmpWorkspace, { recursive: true, force: true });
+    fs.rmSync(tmpExtraPath, { recursive: true, force: true });
+    fs.rmSync(tmpPthTarget, { recursive: true, force: true });
+  });
+
+  it('indexes files from extra paths', async () => {
+    // Open a file that reads a variable set in the extra path
+    const uri = 'file://' + path.join(tmpWorkspace, 'main.py');
+    await epClient.openDocument(uri, fs.readFileSync(path.join(tmpWorkspace, 'main.py'), 'utf-8'));
+    await new Promise(r => setTimeout(r, 500));
+    const diags = epClient.getDiagnostics(uri);
+    // Should NOT warn about $var(ext_defined) — it's set in ext_package/helper.py
+    expect(diags.filter(d => d.code === 'undefined-pv')).toHaveLength(0);
+  });
+
+  it('indexes files from .pth file targets', async () => {
+    // Open a file that imports from the pth-resolved package
+    const uri = 'file://' + path.join(tmpWorkspace, 'pth_test.py');
+    await epClient.openDocument(uri, [
+      'from pth_package import utils',
+      '',
+      'def ksr_request_route(msg):',
+      '    utils.pth_helper()',
+      '    val = KSR.pv.get("$var(pth_var)")',
+    ].join('\n'));
+    await new Promise(r => setTimeout(r, 500));
+    const diags = epClient.getDiagnostics(uri);
+    expect(diags.filter(d => d.code === 'undefined-pv')).toHaveLength(0);
+  });
 });

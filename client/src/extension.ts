@@ -47,10 +47,22 @@ export function activate(context: vscode.ExtensionContext) {
     },
   };
 
+  // Collect extra Python paths from VS Code settings
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || '';
+  const pythonExtraPaths = (
+    vscode.workspace.getConfiguration('python.autoComplete').get<string[]>('extraPaths') || []
+  ).map((p) => p.replace(/\$\{workspaceFolder\}/g, workspaceFolder));
+  const kamailioExtraPaths = (
+    vscode.workspace.getConfiguration('kamailioKemi').get<string[]>('extraPaths') || []
+  ).map((p) => p.replace(/\$\{workspaceFolder\}/g, workspaceFolder));
+
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: 'file', language: 'python' }],
     synchronize: {
       fileEvents: vscode.workspace.createFileSystemWatcher('**/*.py'),
+    },
+    initializationOptions: {
+      extraPaths: [...pythonExtraPaths, ...kamailioExtraPaths],
     },
   };
 

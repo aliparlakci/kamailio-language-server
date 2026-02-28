@@ -33,11 +33,18 @@ export class TestLspClient {
   private docVersions: Map<string, number> = new Map();
 
   private workspaceFolders: Array<{ uri: string; name: string }>;
+  private initOptions: Record<string, unknown> | undefined;
 
-  private constructor(proc: ChildProcess, conn: ProtocolConnection, workspaceFolders: Array<{ uri: string; name: string }>) {
+  private constructor(
+    proc: ChildProcess,
+    conn: ProtocolConnection,
+    workspaceFolders: Array<{ uri: string; name: string }>,
+    initOptions?: Record<string, unknown>
+  ) {
     this.process = proc;
     this.connection = conn;
     this.workspaceFolders = workspaceFolders;
+    this.initOptions = initOptions;
 
     // Collect diagnostics pushed by the server
     conn.onNotification(PublishDiagnosticsNotification.type, (params) => {
@@ -45,7 +52,10 @@ export class TestLspClient {
     });
   }
 
-  static async start(workspaceFolders?: Array<{ uri: string; name: string }>): Promise<TestLspClient> {
+  static async start(
+    workspaceFolders?: Array<{ uri: string; name: string }>,
+    initializationOptions?: Record<string, unknown>
+  ): Promise<TestLspClient> {
     const serverPath = path.join(__dirname, '..', '..', '..', 'out', 'server.js');
     const proc = spawn('node', [serverPath, '--stdio'], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -59,7 +69,7 @@ export class TestLspClient {
     conn.listen();
 
     const folders = workspaceFolders || [{ uri: 'file:///test-workspace', name: 'test' }];
-    const client = new TestLspClient(proc, conn, folders);
+    const client = new TestLspClient(proc, conn, folders, initializationOptions);
     await client.initialize();
     return client;
   }
@@ -85,6 +95,7 @@ export class TestLspClient {
         },
       },
       workspaceFolders: this.workspaceFolders,
+      initializationOptions: this.initOptions,
     };
 
     await this.connection.sendRequest(InitializeRequest.type, params);

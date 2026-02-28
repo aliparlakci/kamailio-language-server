@@ -5,6 +5,8 @@ import {
   InitializeResult,
   TextDocumentSyncKind,
 } from 'vscode-languageserver/node';
+import * as fs from 'fs';
+import * as path from 'path';
 
 import { AnalyzerRegistry } from './core/analyzerRegistry';
 import { DocumentManager } from './core/documentManager';
@@ -78,6 +80,15 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
 
   const workspaceRoots = (params.workspaceFolders || [])
     .map((f) => f.uri.replace('file://', ''));
+
+  // Merge extra Python paths from client settings
+  const extraPaths: string[] = params.initializationOptions?.extraPaths || [];
+  const resolvedExtraPaths = resolveExtraPaths(extraPaths);
+  if (resolvedExtraPaths.length > 0) {
+    connection.console.log(`[init] Extra paths: ${resolvedExtraPaths.join(', ')}`);
+    workspaceRoots.push(...resolvedExtraPaths);
+  }
+
   workspaceIndexer = new WorkspaceIndexer(connection, documentManager, workspaceRoots);
 
   const callGraphAnalyzer = new CallGraphAnalyzer(
@@ -216,5 +227,47 @@ connection.languages.semanticTokens.on((params) => {
 
   return { data };
 });
+
+/** Expand extra paths: include .pth file entries from site-packages dirs. */
+function resolveExtraPaths(extraPaths: string[]): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+
+  for (const p of extraPaths) {
+    const resolved = path.resolve(p);
+    if (seen.has(resolved)) continue;
+    seen.add(resolved);
+
+    if (!fs.existsSync(resolved)) continue;
+    result.push(resolved);
+
+    // If this looks like a site-packages dir, scan for .pth files
+    try {
+      const entries = fs.readdirSync(resolved);
+      for (const entry of entries) {
+        if (!entry.endsWith('.pth')) continue;
+        const pthPath = path.join(resolved, entry);
+        try {
+          const content = fs.readFileSync(pthPath, 'utf-8');
+          for (const line of content.split('\n')) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('import ')) continue;
+            const pthResolved = path.resolve(trimmed);
+            if (!seen.has(pthResolved) && fs.existsSync(pthResolved)) {
+              seen.add(pthResolved);
+              result.push(pthResolved);
+            }
+          }
+        } catch {
+          // Can't read .pth file
+        }
+      }
+    } catch {
+      // Not a directory or can't read
+    }
+  }
+
+  return result;
+}
 
 connection.listen();
