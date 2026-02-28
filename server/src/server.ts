@@ -30,19 +30,49 @@ function scheduleDiagnostics(uri: string, delayMs = 300): void {
     uri,
     setTimeout(() => {
       diagnosticTimers.delete(uri);
-      const state = documentManager.getDocumentState(uri);
-      if (state) {
-        connection.sendDiagnostics({
-          uri: state.uri,
-          diagnostics: registry.getDiagnostics({
-            uri: state.uri,
-            tree: state.tree,
-            fullText: state.content,
-          }),
-        });
-      }
+      sendDiagnosticsForUri(uri);
     }, delayMs)
   );
+}
+
+function sendDiagnosticsForUri(uri: string): void {
+  const state = documentManager.getDocumentState(uri);
+  if (state) {
+    connection.sendDiagnostics({
+      uri: state.uri,
+      diagnostics: registry.getDiagnostics({
+        uri: state.uri,
+        tree: state.tree,
+        fullText: state.content,
+      }),
+    });
+  }
+}
+
+// Re-analyze and re-send diagnostics for all editor-open documents.
+// Needed because changes in one file (constants, cfg) affect diagnostics in others.
+// Re-analysis ensures references are extracted with the latest cross-file constants.
+let allDiagnosticsTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleAllDiagnostics(delayMs = 500): void {
+  if (allDiagnosticsTimer) clearTimeout(allDiagnosticsTimer);
+  allDiagnosticsTimer = setTimeout(() => {
+    allDiagnosticsTimer = null;
+    for (const uri of documentManager.getAllUris()) {
+      if (documentManager.isEditorOpen(uri)) {
+        const state = documentManager.getDocumentState(uri);
+        if (state) {
+          registry.dispatchAnalysis({
+            uri: state.uri,
+            tree: state.tree,
+            changedRanges: [],
+            isFullParse: true,
+            fullText: state.content,
+          });
+          sendDiagnosticsForUri(uri);
+        }
+      }
+    }
+  }, delayMs);
 }
 
 // Send PV decoration data to client for client-side highlighting.
@@ -142,12 +172,16 @@ connection.onDidOpenTextDocument((params) => {
   );
   scheduleDiagnostics(params.textDocument.uri, 0);
   sendDecorations(params.textDocument.uri);
+  // Refresh diagnostics for all open files since cross-file data may have changed
+  scheduleAllDiagnostics();
 });
 
 connection.onDidChangeTextDocument((params) => {
   documentManager.changeDocument(params);
   scheduleDiagnostics(params.textDocument.uri);
   sendDecorations(params.textDocument.uri);
+  // Refresh diagnostics for all open files since constants/definitions may have changed
+  scheduleAllDiagnostics();
 });
 
 connection.onDidCloseTextDocument((params) => {

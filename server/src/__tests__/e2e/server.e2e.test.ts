@@ -871,6 +871,8 @@ describe('E2E: Statistics validation from kamailio.cfg', () => {
       'modparam("statistics", "variable", "invite")',
       'modparam("statistics", "variable", "cancel")',
       'modparam("statistics", "variable", "redirect")',
+      'modparam("statistics", "variable", "rejected_calls_403")',
+      'modparam("statistics", "variable", "rejected_calls_500")',
     ].join('\n'));
 
     statClient = await TestLspClient.start([
@@ -931,5 +933,114 @@ describe('E2E: Statistics validation from kamailio.cfg', () => {
     // char 30 is inside "cancel" on uri1
     const refs = await statClient.getReferences(uri1, 0, 30);
     expect(refs.length).toBe(2);
+  });
+
+  it('resolves f-string with constant interpolation', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_fstring_resolved.py');
+    const code = [
+      'ERROR_CODE = "403"',
+      'KSR.statistics.update_stat(f"rejected_calls_{ERROR_CODE}", 1)',
+    ].join('\n');
+    await statClient.openDocument(uri, code);
+    await new Promise(r => setTimeout(r, 500));
+    const diags = statClient.getDiagnostics(uri);
+    // Resolves to "rejected_calls_403" which IS declared
+    expect(diags.filter(d => d.code === 'undeclared-stat')).toHaveLength(0);
+  });
+
+  it('flags f-string that resolves to undeclared stat', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_fstring_bad.py');
+    const code = [
+      'ERROR_CODE = "999"',
+      'KSR.statistics.update_stat(f"rejected_calls_{ERROR_CODE}", 1)',
+    ].join('\n');
+    await statClient.openDocument(uri, code);
+    const diags = await statClient.waitForDiagnostics(uri);
+    // Resolves to "rejected_calls_999" which is NOT declared
+    expect(diags.some(d => d.code === 'undeclared-stat')).toBe(true);
+  });
+
+  it('skips f-string with unresolvable interpolation', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_fstring_skip.py');
+    // Definitions.DISPATCHER_NO_DEST_CODE is an attribute access, can't resolve
+    await statClient.openDocument(uri, 'KSR.statistics.update_stat(f"rejected_calls_{Definitions.CODE}", 1)');
+    await new Promise(r => setTimeout(r, 500));
+    const diags = statClient.getDiagnostics(uri);
+    expect(diags.filter(d => d.code === 'undeclared-stat')).toHaveLength(0);
+  });
+
+  it('resolves f-string with constant defined in another file', async () => {
+    // File A defines the constant
+    const defUri = 'file://' + path.join(tmpDir, 'stat_const_def.py');
+    await statClient.openDocument(defUri, 'RESPONSE_CODE = "403"');
+    // File B uses it in an f-string
+    const useUri = 'file://' + path.join(tmpDir, 'stat_const_use.py');
+    await statClient.openDocument(useUri, 'KSR.statistics.update_stat(f"rejected_calls_{RESPONSE_CODE}", 1)');
+    await new Promise(r => setTimeout(r, 500));
+    const diags = statClient.getDiagnostics(useUri);
+    // Resolves to "rejected_calls_403" which IS declared
+    expect(diags.filter(d => d.code === 'undeclared-stat')).toHaveLength(0);
+  });
+
+  it('resolves constant passed directly from another file', async () => {
+    // File A defines the constant
+    const defUri = 'file://' + path.join(tmpDir, 'stat_direct_def.py');
+    await statClient.openDocument(defUri, 'STAT_INVITE = "invite"');
+    // File B uses the constant directly as update_stat arg
+    const useUri = 'file://' + path.join(tmpDir, 'stat_direct_use.py');
+    await statClient.openDocument(useUri, 'KSR.statistics.update_stat(STAT_INVITE, 1)');
+    await new Promise(r => setTimeout(r, 500));
+    const diags = statClient.getDiagnostics(useUri);
+    expect(diags.filter(d => d.code === 'undeclared-stat')).toHaveLength(0);
+  });
+
+  it('resolves chained constant aliases', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_chain.py');
+    const code = [
+      'CODE = "403"',
+      'ERR = CODE',
+      'FINAL = ERR',
+      'KSR.statistics.update_stat(f"rejected_calls_{FINAL}", 1)',
+    ].join('\n');
+    await statClient.openDocument(uri, code);
+    await new Promise(r => setTimeout(r, 500));
+    const diags = statClient.getDiagnostics(uri);
+    expect(diags.filter(d => d.code === 'undeclared-stat')).toHaveLength(0);
+  });
+
+  it('resolves constant inside a function body', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_func_const.py');
+    const code = [
+      'def handle():',
+      '    code = "403"',
+      '    KSR.statistics.update_stat(f"rejected_calls_{code}", 1)',
+    ].join('\n');
+    await statClient.openDocument(uri, code);
+    await new Promise(r => setTimeout(r, 500));
+    const diags = statClient.getDiagnostics(uri);
+    expect(diags.filter(d => d.code === 'undeclared-stat')).toHaveLength(0);
+  });
+
+  it('resolves attribute access like Definitions.CONST in f-string', async () => {
+    // definitions.py has the constant
+    const defUri = 'file://' + path.join(tmpDir, 'definitions.py');
+    await statClient.openDocument(defUri, 'DISPATCHER_NO_DEST_CODE = "500"');
+    // usage.py uses Definitions.DISPATCHER_NO_DEST_CODE
+    const useUri = 'file://' + path.join(tmpDir, 'stat_attr.py');
+    await statClient.openDocument(useUri,
+      'KSR.statistics.update_stat(f"rejected_calls_{Definitions.DISPATCHER_NO_DEST_CODE}", 1)');
+    const diags = await statClient.waitForDiagnostics(useUri);
+    // Resolves to "rejected_calls_500" which IS declared
+    expect(diags.filter(d => d.code === 'undeclared-stat')).toHaveLength(0);
+  });
+
+  it('resolves attribute access as direct argument', async () => {
+    const defUri = 'file://' + path.join(tmpDir, 'stat_defs.py');
+    await statClient.openDocument(defUri, 'INVITE_STAT = "invite"');
+    const useUri = 'file://' + path.join(tmpDir, 'stat_attr_direct.py');
+    await statClient.openDocument(useUri, 'KSR.statistics.update_stat(Stats.INVITE_STAT, 1)');
+    await new Promise(r => setTimeout(r, 500));
+    const diags = statClient.getDiagnostics(useUri);
+    expect(diags.filter(d => d.code === 'undeclared-stat')).toHaveLength(0);
   });
 });

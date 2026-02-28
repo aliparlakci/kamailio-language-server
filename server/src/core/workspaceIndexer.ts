@@ -16,8 +16,17 @@ export class WorkspaceIndexer {
   ) {}
 
   async scanWorkspace(): Promise<void> {
-    const pyFiles: string[] = [];
+    // Scan config files first so declared stats are available during .py analysis
+    for (const root of this.workspaceRoots) {
+      this.collectCfgStats(root);
+    }
+    if (this.declaredStats.size > 0) {
+      this.connection.console.log(
+        `[workspace-indexer] Found ${this.declaredStats.size} declared statistics`
+      );
+    }
 
+    const pyFiles: string[] = [];
     for (const root of this.workspaceRoots) {
       this.collectPyFiles(root, pyFiles);
     }
@@ -46,16 +55,6 @@ export class WorkspaceIndexer {
       if (i + batchSize < pyFiles.length) {
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
-    }
-
-    // Scan for kamailio.cfg files and extract statistic declarations
-    for (const root of this.workspaceRoots) {
-      this.collectCfgStats(root);
-    }
-    if (this.declaredStats.size > 0) {
-      this.connection.console.log(
-        `[workspace-indexer] Found ${this.declaredStats.size} declared statistics`
-      );
     }
 
     this.connection.console.log(

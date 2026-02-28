@@ -68,7 +68,8 @@ export class CallGraphAnalyzer implements Analyzer {
   private htablesByFile: Map<string, HtableReference[]> = new Map();
   private hdrsByFile: Map<string, HdrReference[]> = new Map();
   private statsByFile: Map<string, StatReference[]> = new Map();
-  private constantsByFile: Map<string, StringConstants> = new Map();
+  private rawStringsByFile: Map<string, Map<string, string>> = new Map();
+  private rawAliasesByFile: Map<string, Map<string, string>> = new Map();
 
   constructor(
     private getWorkspaceRoots: () => string[],
@@ -115,10 +116,10 @@ export class CallGraphAnalyzer implements Analyzer {
       }
     }
 
-    // Resolve simple string constants (NAME = "value") for use in extraction.
-    // Store per-file, then merge all files so cross-file constants are resolved.
-    const localConstants = extractStringConstants(tree);
-    this.constantsByFile.set(uri, localConstants);
+    // Collect raw string assignments and aliases for cross-file constant resolution.
+    const { rawStrings, rawAliases } = extractRawConstants(tree);
+    this.rawStringsByFile.set(uri, rawStrings);
+    this.rawAliasesByFile.set(uri, rawAliases);
     const allConstants = this.getAllConstants();
 
     // Extract callback registrations (KSR.tm.t_on_failure/t_on_branch)
@@ -400,7 +401,8 @@ export class CallGraphAnalyzer implements Analyzer {
     this.htablesByFile.delete(uri);
     this.hdrsByFile.delete(uri);
     this.statsByFile.delete(uri);
-    this.constantsByFile.delete(uri);
+    this.rawStringsByFile.delete(uri);
+    this.rawAliasesByFile.delete(uri);
   }
 
   // --- Public API for PvAnalyzer ---
@@ -408,13 +410,24 @@ export class CallGraphAnalyzer implements Analyzer {
   getCallGraph(): CallGraph { return this.callGraph; }
 
   private getAllConstants(): StringConstants {
-    const merged: StringConstants = new Map();
-    for (const constants of this.constantsByFile.values()) {
-      for (const [name, value] of constants) {
-        merged.set(name, value);
+    // Merge raw strings and aliases from all files
+    const allStrings: Map<string, string> = new Map();
+    const allAliases: Map<string, string> = new Map();
+    for (const strings of this.rawStringsByFile.values()) {
+      for (const [k, v] of strings) allStrings.set(k, v);
+    }
+    for (const aliases of this.rawAliasesByFile.values()) {
+      for (const [k, v] of aliases) allAliases.set(k, v);
+    }
+    // Resolve alias chains across the merged global data
+    const constants: StringConstants = new Map(allStrings);
+    for (const [name, target] of allAliases) {
+      const resolved = resolveAliasChain(target, allStrings, allAliases);
+      if (resolved !== undefined) {
+        constants.set(name, resolved);
       }
     }
-    return merged;
+    return constants;
   }
 
   // --- Private helpers ---
@@ -720,42 +733,59 @@ function toRange(r: TreeSitterRange): Range {
 
 type StringConstants = Map<string, string>;
 
-function extractStringConstants(tree: Tree): StringConstants {
-  const constants: StringConstants = new Map();
-  const root = tree.rootNode;
-
-  for (let i = 0; i < root.namedChildCount; i++) {
-    const node = root.namedChild(i)!;
-    extractAssignmentConstants(node, constants);
-    // Also look inside class bodies
-    if (node.type === 'class_definition') {
-      const body = node.childForFieldName('body');
-      if (body) {
-        for (let j = 0; j < body.namedChildCount; j++) {
-          extractAssignmentConstants(body.namedChild(j)!, constants);
-        }
-      }
-    }
-  }
-
-  return constants;
+function extractRawConstants(tree: Tree): {
+  rawStrings: Map<string, string>;
+  rawAliases: Map<string, string>;
+} {
+  const rawStrings: Map<string, string> = new Map();
+  const rawAliases: Map<string, string> = new Map();
+  walkForRawAssignments(tree.rootNode, rawStrings, rawAliases);
+  return { rawStrings, rawAliases };
 }
 
-function extractAssignmentConstants(node: SyntaxNode, constants: StringConstants): void {
-  // Match: NAME = "string" (expression_statement > assignment)
+function walkForRawAssignments(
+  node: SyntaxNode,
+  rawStrings: Map<string, string>,
+  rawAliases: Map<string, string>
+): void {
   if (node.type === 'expression_statement') {
     const expr = node.namedChild(0);
     if (expr?.type === 'assignment') {
       const left = expr.childForFieldName('left');
       const right = expr.childForFieldName('right');
-      if (left?.type === 'identifier' && right?.type === 'string') {
-        const content = right.namedChildren.find((c) => c.type === 'string_content');
-        if (content) {
-          constants.set(left.text, content.text);
+      if (left?.type === 'identifier' && right) {
+        if (right.type === 'string') {
+          const hasInterpolation = right.namedChildren.some((c) => c.type === 'interpolation');
+          if (!hasInterpolation) {
+            const content = right.namedChildren.find((c) => c.type === 'string_content');
+            if (content) rawStrings.set(left.text, content.text);
+          }
+        } else if (right.type === 'integer' || right.type === 'float') {
+          rawStrings.set(left.text, right.text);
+        } else if (right.type === 'identifier') {
+          rawAliases.set(left.text, right.text);
         }
       }
     }
   }
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child) walkForRawAssignments(child, rawStrings, rawAliases);
+  }
+}
+
+function resolveAliasChain(
+  target: string,
+  rawStrings: Map<string, string>,
+  rawAliases: Map<string, string>,
+  depth = 0
+): string | undefined {
+  if (depth > 10) return undefined; // prevent infinite loops
+  const direct = rawStrings.get(target);
+  if (direct !== undefined) return direct;
+  const next = rawAliases.get(target);
+  if (next !== undefined) return resolveAliasChain(next, rawStrings, rawAliases, depth + 1);
+  return undefined;
 }
 
 /** Resolve the first argument of a call to a string value + range.
@@ -768,35 +798,91 @@ function resolveFirstStringArg(
   if (!firstArg) return null;
 
   if (firstArg.type === 'string') {
-    const content = firstArg.namedChildren.find((c) => c.type === 'string_content');
-    if (!content) return null;
+    const hasInterpolation = firstArg.namedChildren.some((c) => c.type === 'interpolation');
+
+    if (!hasInterpolation) {
+      // Plain string — extract string_content directly
+      const content = firstArg.namedChildren.find((c) => c.type === 'string_content');
+      if (!content) return null;
+      return {
+        value: content.text,
+        range: {
+          startPosition: content.startPosition,
+          endPosition: content.endPosition,
+          startIndex: content.startIndex,
+          endIndex: content.endIndex,
+        },
+      };
+    }
+
+    // F-string — try to resolve all interpolations from constants
+    let resolved = '';
+    for (const child of firstArg.namedChildren) {
+      if (child.type === 'string_content') {
+        resolved += child.text;
+      } else if (child.type === 'interpolation') {
+        const expr = child.namedChildren[0];
+        const val = resolveExprToConstant(expr, constants);
+        if (val === undefined) return null;
+        resolved += val;
+      }
+    }
+
+    // All interpolations resolved — use the first content/interpolation for range
+    const rangeNode = firstArg.namedChildren.find(
+      (c) => c.type === 'string_content' || c.type === 'interpolation'
+    );
+    if (!rangeNode) return null;
+    const lastNode = [...firstArg.namedChildren].reverse().find(
+      (c) => c.type === 'string_content' || c.type === 'interpolation'
+    )!;
     return {
-      value: content.text,
+      value: resolved,
       range: {
-        startPosition: content.startPosition,
-        endPosition: content.endPosition,
-        startIndex: content.startIndex,
-        endIndex: content.endIndex,
+        startPosition: rangeNode.startPosition,
+        endPosition: lastNode.endPosition,
+        startIndex: rangeNode.startIndex,
+        endIndex: lastNode.endIndex,
       },
     };
   }
 
-  if (firstArg.type === 'identifier') {
-    const resolved = constants.get(firstArg.text);
-    if (resolved) {
-      return {
-        value: resolved,
-        range: {
-          startPosition: firstArg.startPosition,
-          endPosition: firstArg.endPosition,
-          startIndex: firstArg.startIndex,
-          endIndex: firstArg.endIndex,
-        },
-      };
-    }
+  // Identifier or attribute access (e.g., STAT_NAME or Definitions.STAT_NAME)
+  const resolvedVal = resolveExprToConstant(firstArg, constants);
+  if (resolvedVal !== undefined) {
+    return {
+      value: resolvedVal,
+      range: {
+        startPosition: firstArg.startPosition,
+        endPosition: firstArg.endPosition,
+        startIndex: firstArg.startIndex,
+        endIndex: firstArg.endIndex,
+      },
+    };
   }
 
   return null;
+}
+
+/** Try to resolve an expression node to a constant string value.
+ *  Handles: identifier (NAME), attribute (Module.NAME). */
+function resolveExprToConstant(
+  expr: SyntaxNode | undefined,
+  constants: StringConstants
+): string | undefined {
+  if (!expr) return undefined;
+
+  if (expr.type === 'identifier') {
+    return constants.get(expr.text);
+  }
+
+  // Attribute access: Definitions.DISPATCHER_NO_DEST_CODE → look up DISPATCHER_NO_DEST_CODE
+  if (expr.type === 'attribute') {
+    const attr = expr.childForFieldName('attribute');
+    if (attr) return constants.get(attr.text);
+  }
+
+  return undefined;
 }
 
 function positionToOffset(text: string, position: Position): number {
