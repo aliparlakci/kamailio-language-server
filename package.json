@@ -1,5 +1,5 @@
 {
-  "name": "kamailio-kemi-lsp",
+  "name": "kamailio-lsp",
   "displayName": "Kamailio Language Server",
   "description": "Language support for Kamailio Python scripts — pseudo-variable highlighting, completion, diagnostics, and navigation",
   "version": "0.1.0",

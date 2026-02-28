@@ -74,8 +74,12 @@ jobs:
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "Publishing version ${VERSION}"
 
+      - name: Prune to production dependencies for packaging
+        run: npm prune --production
+
       - name: Package extension
-        run: npx @vscode/vsce package --pre-release 
+        run: npx @vscode/vsce package --pre-release --no-dependencies
+
       - name: Publish to VS Code Marketplace
         run: npx @vscode/vsce publish --pre-release --no-dependencies -p ${{ secrets.VSCE_PAT }}
 
