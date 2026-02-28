@@ -1,0 +1,83 @@
+{
+  "name": "kamailio-kemi-lsp",
+  "displayName": "Kamailio KEMI Language Server",
+  "description": "Language support for Kamailio KEMI Python scripts — pseudo-variable highlighting, completion, diagnostics, and navigation",
+  "version": "0.1.0",
+  "publisher": "kamailio-kemi",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:python"
+  ],
+  "main": "./client/out/extension.js",
+  "contributes": {
+    "configuration": {
+      "type": "object",
+      "title": "Kamailio KEMI",
+      "properties": {
+        "kamailioKemi.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable the Kamailio KEMI language server"
+        },
+        "kamailioKemi.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "description": "Traces the communication between VS Code and the language server"
+        }
+      }
+    },
+    "semanticTokenTypes": [
+      {
+        "id": "kamailioPvType",
+        "superType": "type",
+        "description": "Kamailio PV type keyword ($var, $avp, etc.)"
+      },
+      {
+        "id": "kamailioPvName",
+        "superType": "variable",
+        "description": "Kamailio PV name inside parentheses"
+      },
+      {
+        "id": "kamailioPvBuiltin",
+        "superType": "variable",
+        "description": "Kamailio built-in PV ($ru, $fu, etc.)"
+      }
+    ],
+    "semanticTokenModifiers": [
+      {
+        "id": "kamailioPv",
+        "description": "Marks a token as a Kamailio pseudo-variable"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "npm run compile:client && npm run compile:server",
+    "compile:client": "tsc -p client/tsconfig.json",
+    "compile:server": "tsc -p server/tsconfig.json",
+    "watch": "concurrently \"npm run watch:client\" \"npm run watch:server\"",
+    "watch:client": "tsc -w -p client/tsconfig.json",
+    "watch:server": "tsc -w -p server/tsconfig.json",
+    "postinstall": "cd client && npm install && cd ../server && npm install",
+    "copy-wasm": "cp node_modules/tree-sitter-python/tree-sitter-python.wasm server/wasm/ 2>/dev/null || cp server/node_modules/tree-sitter-python/tree-sitter-python.wasm server/wasm/ 2>/dev/null || echo 'WASM file not found, will be resolved at runtime'"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.0.0",
+    "concurrently": "^8.0.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

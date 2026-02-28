@@ -1,0 +1,7 @@
+node_modules/
+out/
+*.js.map
+*.d.ts.map
+*.d.ts
+*.vsix
+server/wasm/*.wasm
