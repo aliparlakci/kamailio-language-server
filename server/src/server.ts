@@ -9,12 +9,14 @@ import {
 import { AnalyzerRegistry } from './core/analyzerRegistry';
 import { DocumentManager } from './core/documentManager';
 import { initTreeSitter } from './core/treeSitterInit';
+import { WorkspaceIndexer } from './core/workspaceIndexer';
 import { PvAnalyzer } from './analyzers/pvAnalyzer/index';
 
 const connection = createConnection(ProposedFeatures.all);
 
 let documentManager: DocumentManager;
 let registry: AnalyzerRegistry;
+let workspaceIndexer: WorkspaceIndexer;
 
 // Debounce diagnostics so intermediate keystrokes don't flood the UI
 const diagnosticTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
@@ -68,10 +70,14 @@ function sendDecorations(uri: string): void {
   });
 }
 
-connection.onInitialize(async (_params: InitializeParams): Promise<InitializeResult> => {
+connection.onInitialize(async (params: InitializeParams): Promise<InitializeResult> => {
   const parser = await initTreeSitter();
   registry = new AnalyzerRegistry();
   documentManager = new DocumentManager(parser, registry);
+
+  const workspaceRoots = (params.workspaceFolders || [])
+    .map((f) => f.uri.replace('file://', ''));
+  workspaceIndexer = new WorkspaceIndexer(connection, documentManager, workspaceRoots);
 
   registry.register(new PvAnalyzer());
 
@@ -95,6 +101,16 @@ connection.onInitialize(async (_params: InitializeParams): Promise<InitializeRes
   };
 });
 
+connection.onInitialized(async () => {
+  await workspaceIndexer.scanWorkspace();
+});
+
+connection.onDidChangeWatchedFiles((params) => {
+  for (const change of params.changes) {
+    workspaceIndexer.onFileChange(change.uri, change.type);
+  }
+});
+
 connection.onDidOpenTextDocument((params) => {
   documentManager.openDocument(
     params.textDocument.uri,
@@ -113,6 +129,7 @@ connection.onDidChangeTextDocument((params) => {
 
 connection.onDidCloseTextDocument((params) => {
   documentManager.closeDocument(params.textDocument.uri);
+  workspaceIndexer.markEditorClosed(params.textDocument.uri);
   connection.sendDiagnostics({ uri: params.textDocument.uri, diagnostics: [] });
 });
 

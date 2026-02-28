@@ -11,13 +11,41 @@ interface DocumentState {
 
 export class DocumentManager {
   private documents: Map<string, DocumentState> = new Map();
+  private editorOpen: Set<string> = new Set();
 
   constructor(
     private parser: Parser,
     private registry: AnalyzerRegistry
   ) {}
 
+  /**
+   * Load a file from disk for background indexing.
+   * Does not overwrite editor-opened documents.
+   */
+  loadFromDisk(uri: string, content: string): void {
+    if (this.editorOpen.has(uri)) return;
+
+    const existing = this.documents.get(uri);
+    if (existing) existing.tree.delete();
+
+    const tree = this.parser.parse(content);
+    const state: DocumentState = { uri, content, tree, version: -1 };
+    this.documents.set(uri, state);
+
+    this.registry.dispatchAnalysis({
+      uri,
+      tree,
+      changedRanges: [],
+      isFullParse: true,
+      fullText: content,
+    });
+  }
+
   openDocument(uri: string, content: string, version: number): void {
+    this.editorOpen.add(uri);
+    const existing = this.documents.get(uri);
+    if (existing) existing.tree.delete();
+
     const tree = this.parser.parse(content);
     const state: DocumentState = { uri, content, tree, version };
     this.documents.set(uri, state);
@@ -112,6 +140,17 @@ export class DocumentManager {
   }
 
   closeDocument(uri: string): void {
+    this.editorOpen.delete(uri);
+    // Don't delete the document state — background indexer may still need it.
+    // The WorkspaceIndexer will re-read from disk if needed.
+  }
+
+  /**
+   * Fully remove a document (both editor and background state).
+   * Called when a file is deleted from disk.
+   */
+  removeDocument(uri: string): void {
+    this.editorOpen.delete(uri);
     const state = this.documents.get(uri);
     if (state) {
       state.tree.delete();
@@ -122,6 +161,18 @@ export class DocumentManager {
 
   getDocumentState(uri: string): { uri: string; content: string; tree: Tree; version: number } | undefined {
     return this.documents.get(uri);
+  }
+
+  hasDocument(uri: string): boolean {
+    return this.documents.has(uri);
+  }
+
+  isEditorOpen(uri: string): boolean {
+    return this.editorOpen.has(uri);
+  }
+
+  getAllUris(): string[] {
+    return Array.from(this.documents.keys());
   }
 
   private offsetAt(text: string, line: number, character: number): number {
