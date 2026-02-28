@@ -613,3 +613,71 @@ describe('E2E: Callback function validation', () => {
     expect(items.some(c => c.label === 'ksr_on_branch_auth')).toBe(true);
   });
 });
+
+describe('E2E: Htable tracking', () => {
+  it('suggests table names inside KSR.htable first arg', async () => {
+    const uri1 = 'file:///test/ht_usage.py';
+    const uri2 = 'file:///test/ht_comp.py';
+    await client.openDocument(uri1, 'KSR.htable.sht_get("DestList", key)');
+    await client.openDocument(uri2, 'KSR.htable.sht_get("")');
+    // char 20 is between the quotes in sht_get("")
+    const items = await client.getCompletions(uri2, 0, 20);
+    expect(items.some(c => c.label === 'DestList')).toBe(true);
+  });
+
+  it('collects table names from different htable methods', async () => {
+    const uri1 = 'file:///test/ht_sets.py';
+    const uri2 = 'file:///test/ht_gets.py';
+    await client.openDocument(uri1, 'KSR.htable.sht_sets("SessionCache", key, val)');
+    await client.openDocument(uri2, 'KSR.htable.sht_get("")');
+    const items = await client.getCompletions(uri2, 0, 20);
+    expect(items.some(c => c.label === 'SessionCache')).toBe(true);
+  });
+
+  it('returns hover for htable table name', async () => {
+    const uri1 = 'file:///test/ht_hover_a.py';
+    const uri2 = 'file:///test/ht_hover_b.py';
+    await client.openDocument(uri1, 'KSR.htable.sht_get("RouteCache", key)');
+    await client.openDocument(uri2, 'KSR.htable.sht_sets("RouteCache", key, val)');
+    // char 22 is inside "RouteCache" in sht_get on uri1
+    const hover = await client.getHover(uri1, 0, 22);
+    expect(hover).not.toBeNull();
+    const content = (hover!.contents as any).value;
+    expect(content).toContain('RouteCache');
+    expect(content).toContain('sht_get');
+    expect(content).toContain('sht_sets');
+  });
+
+  it('finds all references for a table name across documents', async () => {
+    const uri1 = 'file:///test/ht_ref_a.py';
+    const uri2 = 'file:///test/ht_ref_b.py';
+    const uri3 = 'file:///test/ht_ref_c.py';
+    await client.openDocument(uri1, 'KSR.htable.sht_get("RefTable", key)');
+    await client.openDocument(uri2, 'KSR.htable.sht_sets("RefTable", key, val)');
+    await client.openDocument(uri3, 'KSR.htable.sht_rm("RefTable", key)');
+    // char 22 is inside "RefTable" on uri1
+    const refs = await client.getReferences(uri1, 0, 22);
+    expect(refs.length).toBe(3);
+    const uris = refs.map(r => r.uri).sort();
+    expect(uris).toEqual([uri1, uri2, uri3]);
+  });
+
+  it('warns when htable is read but never written to', async () => {
+    const uri = 'file:///test/ht_nowrite.py';
+    await client.openDocument(uri, 'KSR.htable.sht_get("NeverWritten", key)');
+    const diags = await client.waitForDiagnostics(uri);
+    expect(diags.some(d =>
+      d.message.includes('NeverWritten') && d.code === 'htable-never-set'
+    )).toBe(true);
+  });
+
+  it('does not warn when htable is written in another file', async () => {
+    const uri1 = 'file:///test/ht_write.py';
+    const uri2 = 'file:///test/ht_read.py';
+    await client.openDocument(uri1, 'KSR.htable.sht_sets("WrittenTable", key, val)');
+    await client.openDocument(uri2, 'KSR.htable.sht_get("WrittenTable", key)');
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(uri2);
+    expect(diags.filter(d => d.code === 'htable-never-set')).toHaveLength(0);
+  });
+});

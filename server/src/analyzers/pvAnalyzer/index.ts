@@ -482,6 +482,7 @@ export class PvAnalyzer implements Analyzer {
             value: `**${builtin.template}**\n\n${builtin.description}\n\nCategory: \`${builtin.category}\`${builtin.isReadOnly ? '\n\n*Read-only*' : ''}`,
           },
           filterText: builtin.template,
+          sortText: `0${builtin.template}`,
           textEdit: TextEdit.replace(replaceRange, builtin.template),
         });
         seen.add(builtin.template);
@@ -501,6 +502,7 @@ export class PvAnalyzer implements Analyzer {
             kind: CompletionItemKind.Class,
             detail: builtin.description,
             filterText: prefix,
+            sortText: `0${prefix}`,
             insertTextFormat: InsertTextFormat.Snippet,
             textEdit: TextEdit.replace(replaceRange, snippetText),
             command: {
@@ -528,6 +530,7 @@ export class PvAnalyzer implements Analyzer {
               kind: CompletionItemKind.Variable,
               detail: `User-defined ${pvClass} variable`,
               filterText: template,
+              sortText: `0${template}`,
               textEdit: TextEdit.replace(replaceRange, template),
             });
             seen.add(template);
@@ -556,6 +559,7 @@ export class PvAnalyzer implements Analyzer {
               kind: CompletionItemKind.Variable,
               detail: `${pvClass} variable`,
               filterText: name,
+              sortText: `0${name}`,
               textEdit: TextEdit.replace(replaceRange, name),
             });
             seen.add(name);
