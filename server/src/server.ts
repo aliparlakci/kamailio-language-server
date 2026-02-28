@@ -156,6 +156,22 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
 
 connection.onInitialized(async () => {
   await workspaceIndexer.scanWorkspace();
+  // Re-analyze all documents that were opened before scanning finished,
+  // so they pick up cross-file constants and declared stats.
+  for (const uri of documentManager.getAllUris()) {
+    const state = documentManager.getDocumentState(uri);
+    if (state) {
+      registry.dispatchAnalysis({
+        uri: state.uri,
+        tree: state.tree,
+        changedRanges: [],
+        isFullParse: true,
+        fullText: state.content,
+      });
+      sendDiagnosticsForUri(uri);
+      sendDecorations(uri);
+    }
+  }
 });
 
 connection.onDidChangeWatchedFiles((params) => {
