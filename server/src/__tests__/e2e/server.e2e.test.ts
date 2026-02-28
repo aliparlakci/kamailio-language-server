@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { TestLspClient } from './lspClient';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 let client: TestLspClient;
 
@@ -353,5 +356,97 @@ describe('E2E: Multiple PV types across files', () => {
     const diags = await client.waitForDiagnostics(uri);
     // $shv(x) was never set — only $var(x) was
     expect(diags.some(d => d.code === 'undefined-pv' && d.message.includes('$shv(x)'))).toBe(true);
+  });
+});
+
+describe('E2E: Workspace indexing (files on disk, not opened in editor)', () => {
+  let wsClient: TestLspClient;
+  let tmpDir: string;
+
+  beforeAll(async () => {
+    // Create a temp workspace with .py files on disk
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kemi-ws-test-'));
+
+    // File 1: sets $var(disk_var) — NOT opened in editor
+    fs.writeFileSync(path.join(tmpDir, 'setter.py'), [
+      'def setup():',
+      '    KSR.pv.sets("$var(disk_var)", "from_disk")',
+      '    KSR.pv.sets("$shv(disk_shared)", "shared_val")',
+    ].join('\n'));
+
+    // File 2: helper that calls setup() — NOT opened in editor
+    fs.writeFileSync(path.join(tmpDir, 'helpers.py'), [
+      'from setter import setup',
+      '',
+      'def init_all():',
+      '    setup()',
+      '    KSR.pv.sets("$var(helper_var)", "helper_val")',
+    ].join('\n'));
+
+    // Start server with the temp directory as workspace root
+    wsClient = await TestLspClient.start([
+      { uri: 'file://' + tmpDir, name: 'test-workspace' },
+    ]);
+
+    // Give workspace indexer time to scan all files
+    await new Promise(r => setTimeout(r, 500));
+  }, 15000);
+
+  afterAll(async () => {
+    await wsClient.shutdown();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('finds PV definitions from disk files without opening them', async () => {
+    // Open a NEW file that reads $var(disk_var) — set in setter.py on disk
+    const readerUri = 'file://' + path.join(tmpDir, 'reader.py');
+    await wsClient.openDocument(readerUri, 'x = KSR.pv.get("$var(disk_var)")');
+
+    await new Promise(r => setTimeout(r, 500));
+    const diags = wsClient.getDiagnostics(readerUri);
+    // Should NOT warn — setter.py was indexed from disk
+    expect(diags.filter(d => d.code === 'undefined-pv')).toHaveLength(0);
+  });
+
+  it('finds references across disk-indexed and editor-opened files', async () => {
+    // Open a file that uses $shv(disk_shared) — set in setter.py on disk
+    const uri = 'file://' + path.join(tmpDir, 'ref_check.py');
+    await wsClient.openDocument(uri, 'y = KSR.pv.get("$shv(disk_shared)")');
+
+    const refs = await wsClient.getReferences(uri, 0, 20);
+    // Should find at least 2: one in setter.py (disk), one in ref_check.py (editor)
+    expect(refs.length).toBeGreaterThanOrEqual(2);
+
+    const refUris = refs.map(r => r.uri);
+    expect(refUris).toContain('file://' + path.join(tmpDir, 'setter.py'));
+    expect(refUris).toContain(uri);
+  });
+
+  it('go-to-definition jumps to disk-indexed file', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'goto_check.py');
+    await wsClient.openDocument(uri, 'z = KSR.pv.get("$var(helper_var)")');
+
+    const defs = await wsClient.getDefinitions(uri, 0, 20);
+    expect(defs.length).toBeGreaterThan(0);
+    // Definition should be in helpers.py (the disk file)
+    expect(defs[0].uri).toBe('file://' + path.join(tmpDir, 'helpers.py'));
+  });
+
+  it('completions include variables from disk-indexed files', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'comp_check.py');
+    await wsClient.openDocument(uri, 'KSR.pv.get("$var()")');
+
+    const items = await wsClient.getCompletions(uri, 0, 17);
+    // Should include variables from setter.py and helpers.py on disk
+    expect(items.some(c => c.label === 'disk_var')).toBe(true);
+    expect(items.some(c => c.label === 'helper_var')).toBe(true);
+  });
+
+  it('warns correctly when variable is not set anywhere on disk', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'missing_check.py');
+    await wsClient.openDocument(uri, 'w = KSR.pv.get("$var(not_on_disk)")');
+
+    const diags = await wsClient.waitForDiagnostics(uri);
+    expect(diags.some(d => d.code === 'undefined-pv')).toBe(true);
   });
 });

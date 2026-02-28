@@ -32,9 +32,12 @@ export class TestLspClient {
   private diagnostics: Map<string, Diagnostic[]> = new Map();
   private docVersions: Map<string, number> = new Map();
 
-  private constructor(proc: ChildProcess, conn: ProtocolConnection) {
+  private workspaceFolders: Array<{ uri: string; name: string }>;
+
+  private constructor(proc: ChildProcess, conn: ProtocolConnection, workspaceFolders: Array<{ uri: string; name: string }>) {
     this.process = proc;
     this.connection = conn;
+    this.workspaceFolders = workspaceFolders;
 
     // Collect diagnostics pushed by the server
     conn.onNotification(PublishDiagnosticsNotification.type, (params) => {
@@ -42,7 +45,7 @@ export class TestLspClient {
     });
   }
 
-  static async start(): Promise<TestLspClient> {
+  static async start(workspaceFolders?: Array<{ uri: string; name: string }>): Promise<TestLspClient> {
     const serverPath = path.join(__dirname, '..', '..', '..', 'out', 'server.js');
     const proc = spawn('node', [serverPath, '--stdio'], {
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -55,7 +58,8 @@ export class TestLspClient {
 
     conn.listen();
 
-    const client = new TestLspClient(proc, conn);
+    const folders = workspaceFolders || [{ uri: 'file:///test-workspace', name: 'test' }];
+    const client = new TestLspClient(proc, conn, folders);
     await client.initialize();
     return client;
   }
@@ -63,7 +67,7 @@ export class TestLspClient {
   private async initialize(): Promise<void> {
     const params: InitializeParams = {
       processId: process.pid,
-      rootUri: 'file:///test-workspace',
+      rootUri: this.workspaceFolders[0]?.uri || 'file:///test-workspace',
       capabilities: {
         textDocument: {
           completion: {
@@ -80,10 +84,13 @@ export class TestLspClient {
           },
         },
       },
+      workspaceFolders: this.workspaceFolders,
     };
 
     await this.connection.sendRequest(InitializeRequest.type, params);
     await this.connection.sendNotification(InitializedNotification.type, {});
+    // Give workspace indexer time to scan
+    await this.sleep(200);
   }
 
   async openDocument(uri: string, text: string, languageId = 'python'): Promise<void> {
