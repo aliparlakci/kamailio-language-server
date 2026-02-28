@@ -362,22 +362,27 @@ export class PvAnalyzer implements Analyzer {
       : node.type === 'string' ? node.namedChildren.find((c) => c.type === 'string_content')
       : null;
 
-    if (!contentNode) return [];
+    if (!contentNode) {
+      // Empty string — cursor is right after the opening quote
+      // Offer all PV completions, inserting from scratch
+      const emptyRange: Range = { start: position, end: position };
+      return this.getAllPvCompletionItems(emptyRange);
+    }
 
     const stringStart = contentNode.startPosition;
     const fullText = contentNode.text;
-    // How far into the string content the cursor is
     const cursorCol = position.character - stringStart.column;
-    const typed = fullText.substring(0, cursorCol);
+    const typed = fullText.substring(0, Math.max(0, cursorCol));
 
-    // Determine what the user has typed: find the last '$' before cursor
+    // Find the last '$' before cursor
     const dollarIdx = typed.lastIndexOf('$');
     if (dollarIdx === -1) {
-      // No '$' typed yet — no PV completions
-      return [];
+      // No '$' typed yet — offer all PV completions inserting at cursor
+      const insertRange: Range = { start: position, end: position };
+      return this.getAllPvCompletionItems(insertRange);
     }
 
-    const afterDollar = typed.substring(dollarIdx + 1); // e.g., "va", "var(call", "r"
+    const afterDollar = typed.substring(dollarIdx + 1);
     const openParenIdx = afterDollar.indexOf('(');
 
     // Range from the '$' to the cursor — this is what we'll replace
@@ -391,9 +396,8 @@ export class PvAnalyzer implements Analyzer {
     };
 
     if (openParenIdx !== -1) {
-      // User typed something like "$var(call" — we're completing the variable NAME
-      const pvClass = afterDollar.substring(0, openParenIdx); // "var"
-      const namePrefix = afterDollar.substring(openParenIdx + 1); // "call"
+      // User typed "$var(call" — completing the variable NAME
+      const pvClass = afterDollar.substring(0, openParenIdx);
 
       // Range from after the '(' to cursor
       const nameReplaceStart: Position = {
@@ -405,10 +409,14 @@ export class PvAnalyzer implements Analyzer {
         end: position,
       };
 
-      return this.getVariableNameCompletions(pvClass, namePrefix, nameReplaceRange);
+      return this.getVariableNameCompletions(pvClass, nameReplaceRange);
     }
 
     // User typed "$" or "$va" etc — completing the PV class/builtin
+    return this.getAllPvCompletionItems(replaceRange);
+  }
+
+  private getAllPvCompletionItems(replaceRange: Range): CompletionItem[] {
     const items: CompletionItem[] = [];
     const seen = new Set<string>();
 
@@ -430,18 +438,19 @@ export class PvAnalyzer implements Analyzer {
       }
     }
 
-    // Class PV prefixes (e.g., $var(, $shv() — insert $var() with cursor inside
+    // Class PV prefixes (e.g., $var(, $shv() — insert $var() with cursor between parens
     for (const builtin of BUILTIN_PVS) {
       if (!builtin.isBare) {
         const prefix = `$${builtin.pvClass}(`;
         if (!seen.has(prefix)) {
+          // Use snippet syntax: \\$ escapes the $ for snippets, $1 positions cursor
           items.push({
             label: prefix,
             kind: CompletionItemKind.Class,
             detail: builtin.description,
             filterText: prefix,
-            textEdit: TextEdit.replace(replaceRange, `$${builtin.pvClass}()`),
-            // After inserting $var(), re-trigger completion for the name
+            insertTextFormat: InsertTextFormat.Snippet,
+            textEdit: TextEdit.replace(replaceRange, `\\$${builtin.pvClass}($1)`),
             command: {
               title: 'Trigger variable name completion',
               command: 'editor.action.triggerSuggest',
@@ -476,11 +485,10 @@ export class PvAnalyzer implements Analyzer {
     return items;
   }
 
-  private getVariableNameCompletions(pvClass: string, namePrefix: string, replaceRange: Range): CompletionItem[] {
+  private getVariableNameCompletions(pvClass: string, replaceRange: Range): CompletionItem[] {
     const items: CompletionItem[] = [];
     const seen = new Set<string>();
 
-    // Gather all known names for this PV class from across all documents
     for (const index of this.indices.values()) {
       for (const key of index.getAllIdentities()) {
         const parts = key.split(':');
