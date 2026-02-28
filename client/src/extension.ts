@@ -12,8 +12,7 @@ let client: LanguageClient;
 // Decoration types for PV highlighting — these render on top of
 // Pylance's string tokens and can't be overridden.
 const pvTypeDecoration = vscode.window.createTextEditorDecorationType({
-  color: '#c586c0',
-  fontWeight: 'bold',
+  color: '#4ec9b0',
 });
 
 const pvNameDecoration = vscode.window.createTextEditorDecorationType({
@@ -21,8 +20,7 @@ const pvNameDecoration = vscode.window.createTextEditorDecorationType({
 });
 
 const pvBuiltinDecoration = vscode.window.createTextEditorDecorationType({
-  color: '#4ec9b0',
-  fontWeight: 'bold',
+  color: '#9cdcfe',
 });
 
 interface PvDecorationData {

@@ -65,9 +65,9 @@
       "editor.semanticTokenColorCustomizations": {
         "enabled": true,
         "rules": {
-          "kamailioPvType": { "foreground": "#c586c0", "bold": true },
+          "kamailioPvType": { "foreground": "#4ec9b0" },
           "kamailioPvName": { "foreground": "#9cdcfe" },
-          "kamailioPvBuiltin": { "foreground": "#4ec9b0", "bold": true }
+          "kamailioPvBuiltin": { "foreground": "#9cdcfe" }
         }
       }
     }
