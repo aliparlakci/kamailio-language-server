@@ -4,4 +4,3 @@ out/
 *.d.ts.map
 *.d.ts
 *.vsix
-server/wasm/*.wasm
