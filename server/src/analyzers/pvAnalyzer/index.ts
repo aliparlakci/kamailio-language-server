@@ -20,9 +20,10 @@ import { VariableIndex, PvOccurrence } from './variableIndex';
 import { BUILTIN_PVS, BUILTIN_BARE_PVS, BUILTIN_PV_CLASSES } from '../../data/builtinPvs';
 import { SyntaxNode } from 'web-tree-sitter';
 
-// Semantic token type indices (must match legend in server.ts)
-const TOKEN_TYPE_PV_TYPE = 0;    // 'type' in legend
-const TOKEN_TYPE_PV_VARIABLE = 1; // 'variable' in legend
+// Semantic token type indices (must match legend order in server.ts)
+const TOKEN_TYPE_PV_TYPE = 0;     // 'kamailioPvType' — $var(, $avp(, $shv(
+const TOKEN_TYPE_PV_NAME = 1;     // 'kamailioPvName' — the name inside parens
+const TOKEN_TYPE_PV_BUILTIN = 2;  // 'kamailioPvBuiltin' — $ru, $fu, $si
 
 // Semantic token modifier flags
 const MODIFIER_WRITE = 0b10; // 'modification' in legend
@@ -34,24 +35,15 @@ export class PvAnalyzer implements Analyzer {
   private indices: Map<string, VariableIndex> = new Map();
 
   analyze(context: AnalysisContext): void {
-    let index = this.indices.get(context.uri);
+    // Always rebuild index from the full tree. Tree-sitter parsing is
+    // already incremental; walking the parsed tree for KSR.pv calls is
+    // cheap even for multi-thousand-line files. This avoids range
+    // mismatch bugs where removeInRange doesn't cover the same scope
+    // as the re-extraction.
+    const index = new VariableIndex();
+    this.indices.set(context.uri, index);
 
-    if (context.isFullParse) {
-      index = new VariableIndex();
-      this.indices.set(context.uri, index);
-    } else if (index && context.changedRanges.length > 0) {
-      for (const range of context.changedRanges) {
-        index.removeInRange(range.startIndex, range.endIndex);
-      }
-    } else if (!index) {
-      index = new VariableIndex();
-      this.indices.set(context.uri, index);
-    }
-
-    const refs = extractPvReferences(
-      context.tree,
-      context.isFullParse ? undefined : context.changedRanges
-    );
+    const refs = extractPvReferences(context.tree);
 
     for (const ref of refs) {
       const parsedPvs = parsePvString(ref.pvString);
@@ -90,16 +82,16 @@ export class PvAnalyzer implements Analyzer {
 
     for (const occ of index.getAll()) {
       if (occ.pv.isBare) {
-        // Bare PV like $ru — highlight as variable
+        // Bare PV like $ru — highlight as builtin
         tokens.push({
           line: occ.range.startPosition.row,
           char: occ.range.startPosition.column,
           length: occ.pv.length,
-          tokenType: TOKEN_TYPE_PV_VARIABLE,
+          tokenType: TOKEN_TYPE_PV_BUILTIN,
           tokenModifiers: occ.isWrite ? MODIFIER_WRITE : 0,
         });
       } else {
-        // Class PV like $var(name) — highlight $ + class as type, name as variable
+        // Class PV like $var(name) — highlight $class( as type, name as name
         const classLen = 1 + occ.pv.pvClass.length + 1; // $class(
         tokens.push({
           line: occ.range.startPosition.row,
@@ -113,7 +105,7 @@ export class PvAnalyzer implements Analyzer {
             line: occ.range.startPosition.row,
             char: occ.range.startPosition.column + classLen,
             length: occ.pv.innerName.length,
-            tokenType: TOKEN_TYPE_PV_VARIABLE,
+            tokenType: TOKEN_TYPE_PV_NAME,
             tokenModifiers: occ.isWrite ? MODIFIER_WRITE : 0,
           });
         }

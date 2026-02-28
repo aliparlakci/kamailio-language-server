@@ -60,7 +60,17 @@
         "id": "kamailioPv",
         "description": "Marks a token as a Kamailio pseudo-variable"
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "editor.semanticTokenColorCustomizations": {
+        "enabled": true,
+        "rules": {
+          "kamailioPvType": { "foreground": "#c586c0", "bold": true },
+          "kamailioPvName": { "foreground": "#9cdcfe" },
+          "kamailioPvBuiltin": { "foreground": "#4ec9b0", "bold": true }
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "npm run compile:client && npm run compile:server",

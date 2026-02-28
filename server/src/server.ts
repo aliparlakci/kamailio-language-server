@@ -16,6 +16,30 @@ const connection = createConnection(ProposedFeatures.all);
 let documentManager: DocumentManager;
 let registry: AnalyzerRegistry;
 
+// Debounce diagnostics so intermediate keystrokes don't flood the UI
+const diagnosticTimers: Map<string, ReturnType<typeof setTimeout>> = new Map();
+function scheduleDiagnostics(uri: string, delayMs = 300): void {
+  const existing = diagnosticTimers.get(uri);
+  if (existing) clearTimeout(existing);
+  diagnosticTimers.set(
+    uri,
+    setTimeout(() => {
+      diagnosticTimers.delete(uri);
+      const state = documentManager.getDocumentState(uri);
+      if (state) {
+        connection.sendDiagnostics({
+          uri: state.uri,
+          diagnostics: registry.getDiagnostics({
+            uri: state.uri,
+            tree: state.tree,
+            fullText: state.content,
+          }),
+        });
+      }
+    }, delayMs)
+  );
+}
+
 connection.onInitialize(async (_params: InitializeParams): Promise<InitializeResult> => {
   const parser = await initTreeSitter();
   registry = new AnalyzerRegistry();
@@ -31,7 +55,7 @@ connection.onInitialize(async (_params: InitializeParams): Promise<InitializeRes
       },
       semanticTokensProvider: {
         legend: {
-          tokenTypes: ['type', 'variable'],
+          tokenTypes: ['kamailioPvType', 'kamailioPvName', 'kamailioPvBuiltin'],
           tokenModifiers: ['declaration', 'modification'],
         },
         full: true,
@@ -49,34 +73,14 @@ connection.onDidOpenTextDocument((params) => {
     params.textDocument.text,
     params.textDocument.version
   );
-
-  const state = documentManager.getDocumentState(params.textDocument.uri);
-  if (state) {
-    connection.sendDiagnostics({
-      uri: state.uri,
-      diagnostics: registry.getDiagnostics({
-        uri: state.uri,
-        tree: state.tree,
-        fullText: state.content,
-      }),
-    });
-  }
+  // Publish diagnostics immediately on file open
+  scheduleDiagnostics(params.textDocument.uri, 0);
 });
 
 connection.onDidChangeTextDocument((params) => {
   documentManager.changeDocument(params);
-
-  const state = documentManager.getDocumentState(params.textDocument.uri);
-  if (state) {
-    connection.sendDiagnostics({
-      uri: state.uri,
-      diagnostics: registry.getDiagnostics({
-        uri: state.uri,
-        tree: state.tree,
-        fullText: state.content,
-      }),
-    });
-  }
+  // Debounce diagnostics while the user is typing
+  scheduleDiagnostics(params.textDocument.uri);
 });
 
 connection.onDidCloseTextDocument((params) => {
@@ -122,12 +126,17 @@ connection.onHover((params) => {
 
 connection.languages.semanticTokens.on((params) => {
   const state = documentManager.getDocumentState(params.textDocument.uri);
-  if (!state) return { data: [] };
+  if (!state) {
+    connection.console.log('[semantic-tokens] No document state for: ' + params.textDocument.uri);
+    return { data: [] };
+  }
   const tokens = registry.getSemanticTokens({
     uri: state.uri,
     tree: state.tree,
     fullText: state.content,
   });
+
+  connection.console.log(`[semantic-tokens] ${tokens.length} tokens for ${params.textDocument.uri}`);
 
   // Encode tokens using delta encoding as required by LSP
   const sorted = tokens.sort((a, b) =>
