@@ -443,14 +443,16 @@ export class PvAnalyzer implements Analyzer {
       if (!builtin.isBare) {
         const prefix = `$${builtin.pvClass}(`;
         if (!seen.has(prefix)) {
-          // Use snippet syntax: \\$ escapes the $ for snippets, $1 positions cursor
+          // Snippet: \\$ is literal $ in snippet syntax, $1 positions cursor between parens
+          // Use string concatenation to avoid JS template literal consuming $ before ${
+          const snippetText = '\\$' + builtin.pvClass + '($1)';
           items.push({
             label: prefix,
             kind: CompletionItemKind.Class,
             detail: builtin.description,
             filterText: prefix,
             insertTextFormat: InsertTextFormat.Snippet,
-            textEdit: TextEdit.replace(replaceRange, `\\$${builtin.pvClass}($1)`),
+            textEdit: TextEdit.replace(replaceRange, snippetText),
             command: {
               title: 'Trigger variable name completion',
               command: 'editor.action.triggerSuggest',

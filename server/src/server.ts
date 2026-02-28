@@ -79,7 +79,7 @@ connection.onInitialize(async (_params: InitializeParams): Promise<InitializeRes
     capabilities: {
       textDocumentSync: TextDocumentSyncKind.Incremental,
       completionProvider: {
-        triggerCharacters: ['$', '('],
+        triggerCharacters: ['$', '(', '"', "'"],
       },
       semanticTokensProvider: {
         legend: {
@@ -119,10 +119,13 @@ connection.onDidCloseTextDocument((params) => {
 connection.onCompletion((params) => {
   const state = documentManager.getDocumentState(params.textDocument.uri);
   if (!state) return [];
-  return registry.getCompletions(
+  const items = registry.getCompletions(
     { uri: state.uri, tree: state.tree, fullText: state.content },
     params.position
   );
+  // isIncomplete forces VS Code to re-request on each keystroke,
+  // ensuring textEdit ranges are always fresh (not stale from a prior request)
+  return { items, isIncomplete: true };
 });
 
 connection.onDefinition((params) => {
