@@ -5,9 +5,15 @@ import { DocumentManager } from './documentManager';
 
 const STAT_MODPARAM_RE = /modparam\s*\(\s*"statistics"\s*,\s*"variable"\s*,\s*"([^"]+)"\s*\)/g;
 
+export interface StatDeclaration {
+  name: string;
+  uri: string;
+  line: number;
+}
+
 export class WorkspaceIndexer {
   private knownFiles: Set<string> = new Set();
-  private declaredStats: Set<string> = new Set();
+  private declaredStats: Map<string, StatDeclaration> = new Map();
 
   constructor(
     private connection: Connection,
@@ -110,7 +116,7 @@ export class WorkspaceIndexer {
     return this.workspaceRoots;
   }
 
-  getDeclaredStats(): Set<string> {
+  getDeclaredStats(): Map<string, StatDeclaration> {
     return this.declaredStats;
   }
 
@@ -125,10 +131,14 @@ export class WorkspaceIndexer {
         } else if (entry.name.endsWith('.cfg')) {
           try {
             const content = fs.readFileSync(fullPath, 'utf-8');
-            let match: RegExpExecArray | null;
-            STAT_MODPARAM_RE.lastIndex = 0;
-            while ((match = STAT_MODPARAM_RE.exec(content)) !== null) {
-              this.declaredStats.add(match[1]);
+            const uri = 'file://' + fullPath;
+            const lines = content.split('\n');
+            for (let lineNo = 0; lineNo < lines.length; lineNo++) {
+              STAT_MODPARAM_RE.lastIndex = 0;
+              const match = STAT_MODPARAM_RE.exec(lines[lineNo]);
+              if (match) {
+                this.declaredStats.set(match[1], { name: match[1], uri, line: lineNo });
+              }
             }
           } catch {
             // Can't read file

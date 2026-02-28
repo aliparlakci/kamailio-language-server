@@ -74,7 +74,7 @@ export class CallGraphAnalyzer implements Analyzer {
   constructor(
     private getWorkspaceRoots: () => string[],
     private getKnownFiles: () => Set<string>,
-    private getDeclaredStats: () => Set<string> = () => new Set()
+    private getDeclaredStats: () => Map<string, { name: string; uri: string; line: number }> = () => new Map()
   ) {}
 
   analyze(context: AnalysisContext): void {
@@ -352,19 +352,35 @@ export class CallGraphAnalyzer implements Analyzer {
   }
 
   getDefinitions(doc: DocumentContext, position: Position): Location[] {
+    // Callback → function definition
     const cb = this.findCallbackAtPosition(doc, position);
-    if (!cb) return [];
+    if (cb) {
+      const funcDef = this.findFunctionByName(cb.name);
+      if (!funcDef) return [];
+      return [{
+        uri: funcDef.uri,
+        range: {
+          start: { line: funcDef.nameRange.startPosition.row, character: funcDef.nameRange.startPosition.column },
+          end: { line: funcDef.nameRange.endPosition.row, character: funcDef.nameRange.endPosition.column },
+        },
+      }];
+    }
 
-    const funcDef = this.findFunctionByName(cb.name);
-    if (!funcDef) return [];
+    // Stat → kamailio.cfg declaration
+    const stat = this.findStatAtPosition(doc, position);
+    if (stat) {
+      const decl = this.getDeclaredStats().get(stat.statName);
+      if (!decl) return [];
+      return [{
+        uri: decl.uri,
+        range: {
+          start: { line: decl.line, character: 0 },
+          end: { line: decl.line, character: 0 },
+        },
+      }];
+    }
 
-    return [{
-      uri: funcDef.uri,
-      range: {
-        start: { line: funcDef.nameRange.startPosition.row, character: funcDef.nameRange.startPosition.column },
-        end: { line: funcDef.nameRange.endPosition.row, character: funcDef.nameRange.endPosition.column },
-      },
-    }];
+    return [];
   }
 
   getCompletions(doc: DocumentContext, position: Position): CompletionItem[] {
@@ -656,7 +672,7 @@ export class CallGraphAnalyzer implements Analyzer {
     const seen = new Set<string>();
 
     // Declared stats from kamailio.cfg
-    for (const name of this.getDeclaredStats()) {
+    for (const [name] of this.getDeclaredStats()) {
       seen.add(name);
       items.push({
         label: name,
