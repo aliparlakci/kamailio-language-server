@@ -1,8 +1,9 @@
 **/*.ts
 **/tsconfig*.json
 **/src/**
-**/node_modules/**
 **/__tests__/**
+client/node_modules/**
+server/node_modules/**
 .vscode/
 .claude/
 .github/

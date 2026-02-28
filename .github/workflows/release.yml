@@ -75,8 +75,7 @@ jobs:
           echo "Publishing version ${VERSION}"
 
       - name: Package extension
-        run: npx @vscode/vsce package --pre-release --no-dependencies
-
+        run: npx @vscode/vsce package --pre-release 
       - name: Publish to VS Code Marketplace
         run: npx @vscode/vsce publish --pre-release --no-dependencies -p ${{ secrets.VSCE_PAT }}
 

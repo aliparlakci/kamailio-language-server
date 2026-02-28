@@ -85,7 +85,7 @@
     "watch:server": "tsc -w -p server/tsconfig.json",
     "test": "cd server && npm test",
     "postinstall": "cd client && npm install && cd ../server && npm install",
-    "copy-wasm": "cp node_modules/tree-sitter-python/tree-sitter-python.wasm server/wasm/ 2>/dev/null || cp server/node_modules/tree-sitter-python/tree-sitter-python.wasm server/wasm/ 2>/dev/null || echo 'WASM file not found, will be resolved at runtime'"
+    "copy-wasm": "cp node_modules/tree-sitter-python/tree-sitter-python.wasm server/wasm/ 2>/dev/null || cp server/node_modules/tree-sitter-python/tree-sitter-python.wasm server/wasm/ 2>/dev/null || echo 'WASM not found'"
   },
   "devDependencies": {
     "@vscode/vsce": "^3.0.0",
@@ -93,6 +93,10 @@
     "typescript": "^5.3.0"
   },
   "dependencies": {
-    "vscode-languageclient": "^9.0.1"
+    "vscode-languageclient": "^9.0.1",
+    "vscode-languageserver": "^9.0.1",
+    "vscode-languageserver-textdocument": "^1.0.11",
+    "web-tree-sitter": "^0.24.3",
+    "tree-sitter-python": "^0.23.6"
   }
 }
