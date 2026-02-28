@@ -1,0 +1,84 @@
+name: Release Extension
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Install client dependencies
+        run: cd client && npm install
+
+      - name: Install server dependencies
+        run: cd server && npm install
+
+      - name: Copy WASM
+        run: npm run copy-wasm
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Test
+        run: cd server && npx vitest run --exclude 'out/**'
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install root dependencies
+        run: npm install
+
+      - name: Install client dependencies
+        run: cd client && npm install
+
+      - name: Install server dependencies
+        run: cd server && npm install
+
+      - name: Copy WASM
+        run: npm run copy-wasm
+
+      - name: Compile
+        run: npm run compile
+
+      - name: Bump version based on commit count
+        run: |
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          VERSION="0.1.${COMMIT_COUNT}"
+          node -e "
+            const pkg = require('./package.json');
+            pkg.version = '${VERSION}';
+            require('fs').writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
+          "
+          echo "VERSION=${VERSION}" >> $GITHUB_ENV
+          echo "Publishing version ${VERSION}"
+
+      - name: Package extension
+        run: npx @vscode/vsce package --pre-release --no-dependencies
+
+      - name: Publish to VS Code Marketplace
+        run: npx @vscode/vsce publish --pre-release --no-dependencies -p ${{ secrets.VSCE_PAT }}
+
+      - name: Upload VSIX as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kamailio-kemi-lsp-${{ env.VERSION }}.vsix
+          path: "*.vsix"
