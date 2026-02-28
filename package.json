@@ -96,7 +96,14 @@
         "id": "kamailioPv",
         "description": "Marks a token as a Kamailio pseudo-variable"
       }
-    ]
+    ],
+    "configurationDefaults": {
+      "[python]": {
+        "editor.quickSuggestions": {
+          "strings": "on"
+        }
+      }
+    }
   },
   "scripts": {
     "compile": "npm run compile:client && npm run compile:server",

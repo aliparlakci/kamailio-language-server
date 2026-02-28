@@ -68,31 +68,6 @@ export function activate(context: vscode.ExtensionContext) {
     });
   });
 
-  // Auto-trigger completions when typing inside KSR-related strings.
-  // VS Code disables quick suggestions inside strings by default, so
-  // without this, completions only appear via Ctrl+Space.
-  context.subscriptions.push(
-    vscode.workspace.onDidChangeTextDocument((event) => {
-      const editor = vscode.window.activeTextEditor;
-      if (!editor || editor.document !== event.document) return;
-      if (event.document.languageId !== 'python') return;
-      if (event.contentChanges.length !== 1) return;
-      if (event.contentChanges[0].text.length !== 1) return;
-
-      const position = editor.selection.active;
-      const line = editor.document.lineAt(position.line).text;
-      const before = line.substring(0, position.character);
-      if (
-        /\$\w+\([^)"']*$/.test(before) ||  // inside $var(), $avp(), etc.
-        /\$\w*$/.test(before) ||             // after $ (PV class/builtin)
-        /KSR\.tm\.t_on_\w+\("[^"]*$/.test(before) ||  // inside t_on_failure/t_on_branch string
-        /KSR\.htable\.sht_\w+\("[^"]*$/.test(before)  // inside htable first arg
-      ) {
-        vscode.commands.executeCommand('editor.action.triggerSuggest');
-      }
-    }),
-  );
-
   context.subscriptions.push(
     pvTypeDecoration,
     pvNameDecoration,

@@ -19,6 +19,7 @@ import {
 import { CallGraph } from './callGraph';
 import { ImportResolver, ImportBinding } from './importResolver';
 import { extractFunctions, ExtractedFunction, FunctionDef } from './functionExtractor';
+import { STANDARD_SIP_HEADERS, findStandardHeader } from '../../data/sipHeaders';
 import { MarkupKind } from 'vscode-languageserver';
 import { SyntaxNode, Tree } from 'web-tree-sitter';
 
@@ -27,6 +28,9 @@ const HTABLE_METHODS = new Set([
   'sht_get', 'sht_gete', 'sht_sets', 'sht_seti', 'sht_inc', 'sht_rm',
 ]);
 const HTABLE_WRITE_METHODS = new Set(['sht_sets', 'sht_seti', 'sht_inc']);
+const HDR_METHODS = new Set([
+  'get', 'gete', 'gete_idx', 'is_present', 'remove',
+]);
 
 interface CallbackReference {
   name: string;
@@ -36,6 +40,12 @@ interface CallbackReference {
 
 interface HtableReference {
   tableName: string;
+  method: string;
+  nameRange: TreeSitterRange;
+}
+
+interface HdrReference {
+  headerName: string;
   method: string;
   nameRange: TreeSitterRange;
 }
@@ -50,6 +60,7 @@ export class CallGraphAnalyzer implements Analyzer {
   private functionsByFile: Map<string, ExtractedFunction[]> = new Map();
   private callbacksByFile: Map<string, CallbackReference[]> = new Map();
   private htablesByFile: Map<string, HtableReference[]> = new Map();
+  private hdrsByFile: Map<string, HdrReference[]> = new Map();
 
   constructor(
     private getWorkspaceRoots: () => string[],
@@ -95,13 +106,20 @@ export class CallGraphAnalyzer implements Analyzer {
       }
     }
 
+    // Resolve simple string constants (NAME = "value") for use in extraction
+    const constants = extractStringConstants(tree);
+
     // Extract callback registrations (KSR.tm.t_on_failure/t_on_branch)
-    const callbacks = extractCallbackRegistrations(tree);
+    const callbacks = extractCallbackRegistrations(tree, constants);
     this.callbacksByFile.set(uri, callbacks);
 
     // Extract htable references (KSR.htable.sht_*)
-    const htables = extractHtableReferences(tree);
+    const htables = extractHtableReferences(tree, constants);
     this.htablesByFile.set(uri, htables);
+
+    // Extract header references (KSR.hdr.*)
+    const hdrs = extractHdrReferences(tree, constants);
+    this.hdrsByFile.set(uri, hdrs);
   }
 
   private resolveCallee(callee: string, fromUri: string): string | null {
@@ -132,53 +150,77 @@ export class CallGraphAnalyzer implements Analyzer {
   getSemanticTokens(_doc: DocumentContext): SemanticTokenData[] { return []; }
 
   getReferences(doc: DocumentContext, position: Position): Location[] {
+    // Htable references
     const ht = this.findHtableAtPosition(doc, position);
-    if (!ht) return [];
-
-    const refs: Location[] = [];
-    for (const [uri, htRefs] of this.htablesByFile) {
-      for (const ref of htRefs) {
-        if (ref.tableName === ht.tableName) {
-          refs.push({
-            uri,
-            range: {
-              start: { line: ref.nameRange.startPosition.row, character: ref.nameRange.startPosition.column },
-              end: { line: ref.nameRange.endPosition.row, character: ref.nameRange.endPosition.column },
-            },
-          });
+    if (ht) {
+      const refs: Location[] = [];
+      for (const [uri, htRefs] of this.htablesByFile) {
+        for (const ref of htRefs) {
+          if (ref.tableName === ht.tableName) {
+            refs.push({ uri, range: toRange(ref.nameRange) });
+          }
         }
       }
+      return refs;
     }
-    return refs;
+
+    // Hdr references
+    const hdr = this.findHdrAtPosition(doc, position);
+    if (hdr) {
+      const refs: Location[] = [];
+      for (const [uri, hdrRefs] of this.hdrsByFile) {
+        for (const ref of hdrRefs) {
+          if (ref.headerName === hdr.headerName) {
+            refs.push({ uri, range: toRange(ref.nameRange) });
+          }
+        }
+      }
+      return refs;
+    }
+
+    return [];
   }
 
   getHover(doc: DocumentContext, position: Position): Hover | null {
+    // Htable hover
     const ht = this.findHtableAtPosition(doc, position);
-    if (!ht) return null;
-
-    // Collect all references to this table across all files
-    const methods = new Map<string, number>();
-    for (const refs of this.htablesByFile.values()) {
-      for (const ref of refs) {
-        if (ref.tableName === ht.tableName) {
-          methods.set(ref.method, (methods.get(ref.method) || 0) + 1);
+    if (ht) {
+      const methods = new Map<string, number>();
+      for (const refs of this.htablesByFile.values()) {
+        for (const ref of refs) {
+          if (ref.tableName === ht.tableName) {
+            methods.set(ref.method, (methods.get(ref.method) || 0) + 1);
+          }
         }
       }
+      const lines = [
+        `**htable: ${ht.tableName}**`,
+        '',
+        ...Array.from(methods.entries()).map(([m, count]) => `- \`${m}\`: ${count} call site${count > 1 ? 's' : ''}`),
+      ];
+      return {
+        contents: { kind: MarkupKind.Markdown, value: lines.join('\n') },
+        range: toRange(ht.nameRange),
+      };
     }
 
-    const lines = [
-      `**htable: ${ht.tableName}**`,
-      '',
-      ...Array.from(methods.entries()).map(([m, count]) => `- \`${m}\`: ${count} call site${count > 1 ? 's' : ''}`),
-    ];
+    // SIP header hover
+    const hdr = this.findHdrAtPosition(doc, position);
+    if (hdr) {
+      const standard = findStandardHeader(hdr.headerName);
+      const lines = [
+        `**${hdr.headerName}**`,
+        '',
+        standard ? standard.description : 'Custom SIP header',
+      ];
+      if (standard?.rfc) lines.push('', `*${standard.rfc}*`);
+      return {
+        contents: { kind: MarkupKind.Markdown, value: lines.join('\n') },
+        range: toRange(hdr.nameRange),
+      };
+    }
 
-    return {
-      contents: { kind: MarkupKind.Markdown, value: lines.join('\n') },
-      range: {
-        start: { line: ht.nameRange.startPosition.row, character: ht.nameRange.startPosition.column },
-        end: { line: ht.nameRange.endPosition.row, character: ht.nameRange.endPosition.column },
-      },
-    };
+    return null;
   }
 
   getDiagnostics(doc: DocumentContext): Diagnostic[] {
@@ -271,6 +313,10 @@ export class CallGraphAnalyzer implements Analyzer {
       return this.getHtableCompletions(node, position);
     }
 
+    if (this.isInsideHdrString(node)) {
+      return this.getHdrCompletions(node, position);
+    }
+
     return [];
   }
 
@@ -280,6 +326,7 @@ export class CallGraphAnalyzer implements Analyzer {
     this.functionsByFile.delete(uri);
     this.callbacksByFile.delete(uri);
     this.htablesByFile.delete(uri);
+    this.hdrsByFile.delete(uri);
   }
 
   // --- Public API for PvAnalyzer ---
@@ -432,9 +479,170 @@ export class CallGraphAnalyzer implements Analyzer {
     }
     return { start: position, end: position };
   }
+
+  private getHdrCompletions(node: SyntaxNode, position: Position): CompletionItem[] {
+    const replaceRange = this.getStringContentRange(node, position);
+    const items: CompletionItem[] = [];
+    const seen = new Set<string>();
+
+    // Standard SIP headers
+    for (const h of STANDARD_SIP_HEADERS) {
+      seen.add(h.name);
+      items.push({
+        label: h.name,
+        kind: CompletionItemKind.EnumMember,
+        detail: h.rfc,
+        documentation: h.description,
+        sortText: `0${h.name}`,
+        textEdit: TextEdit.replace(replaceRange, h.name),
+      });
+    }
+
+    // Custom headers from workspace
+    for (const refs of this.hdrsByFile.values()) {
+      for (const ref of refs) {
+        if (seen.has(ref.headerName)) continue;
+        seen.add(ref.headerName);
+        items.push({
+          label: ref.headerName,
+          kind: CompletionItemKind.Value,
+          detail: 'Custom header',
+          sortText: `0${ref.headerName}`,
+          textEdit: TextEdit.replace(replaceRange, ref.headerName),
+        });
+      }
+    }
+
+    return items;
+  }
+
+  private isInsideHdrString(node: SyntaxNode): boolean {
+    let current: SyntaxNode | null = node;
+    let stringNode: SyntaxNode | null = null;
+
+    while (current) {
+      if (current.type === 'string') {
+        stringNode = current;
+      } else if (current.type === 'string_content' || current.type === 'string_start' || current.type === 'string_end') {
+        stringNode = current.parent;
+      }
+      if (current.type === 'call' && stringNode) {
+        const argsNode = current.childForFieldName('arguments');
+        if (argsNode) {
+          const firstArg = argsNode.namedChild(0);
+          if (firstArg && firstArg.startIndex === stringNode.startIndex) {
+            const funcNode = current.childForFieldName('function');
+            if (funcNode && isKsrHdrMethod(funcNode)) {
+              return true;
+            }
+          }
+        }
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
+  private findHdrAtPosition(doc: DocumentContext, position: Position): HdrReference | undefined {
+    const hdrs = this.hdrsByFile.get(doc.uri);
+    if (!hdrs) return undefined;
+
+    const offset = positionToOffset(doc.fullText, position);
+    return hdrs.find(
+      (h) => offset >= h.nameRange.startIndex && offset < h.nameRange.endIndex
+    );
+  }
 }
 
 // --- Module-level helpers ---
+
+function toRange(r: TreeSitterRange): Range {
+  return {
+    start: { line: r.startPosition.row, character: r.startPosition.column },
+    end: { line: r.endPosition.row, character: r.endPosition.column },
+  };
+}
+
+type StringConstants = Map<string, string>;
+
+function extractStringConstants(tree: Tree): StringConstants {
+  const constants: StringConstants = new Map();
+  const root = tree.rootNode;
+
+  for (let i = 0; i < root.namedChildCount; i++) {
+    const node = root.namedChild(i)!;
+    extractAssignmentConstants(node, constants);
+    // Also look inside class bodies
+    if (node.type === 'class_definition') {
+      const body = node.childForFieldName('body');
+      if (body) {
+        for (let j = 0; j < body.namedChildCount; j++) {
+          extractAssignmentConstants(body.namedChild(j)!, constants);
+        }
+      }
+    }
+  }
+
+  return constants;
+}
+
+function extractAssignmentConstants(node: SyntaxNode, constants: StringConstants): void {
+  // Match: NAME = "string" (expression_statement > assignment)
+  if (node.type === 'expression_statement') {
+    const expr = node.namedChild(0);
+    if (expr?.type === 'assignment') {
+      const left = expr.childForFieldName('left');
+      const right = expr.childForFieldName('right');
+      if (left?.type === 'identifier' && right?.type === 'string') {
+        const content = right.namedChildren.find((c) => c.type === 'string_content');
+        if (content) {
+          constants.set(left.text, content.text);
+        }
+      }
+    }
+  }
+}
+
+/** Resolve the first argument of a call to a string value + range.
+ *  Handles both string literals and identifier references to constants. */
+function resolveFirstStringArg(
+  argsNode: SyntaxNode,
+  constants: StringConstants
+): { value: string; range: TreeSitterRange } | null {
+  const firstArg = argsNode.namedChild(0);
+  if (!firstArg) return null;
+
+  if (firstArg.type === 'string') {
+    const content = firstArg.namedChildren.find((c) => c.type === 'string_content');
+    if (!content) return null;
+    return {
+      value: content.text,
+      range: {
+        startPosition: content.startPosition,
+        endPosition: content.endPosition,
+        startIndex: content.startIndex,
+        endIndex: content.endIndex,
+      },
+    };
+  }
+
+  if (firstArg.type === 'identifier') {
+    const resolved = constants.get(firstArg.text);
+    if (resolved) {
+      return {
+        value: resolved,
+        range: {
+          startPosition: firstArg.startPosition,
+          endPosition: firstArg.endPosition,
+          startIndex: firstArg.startIndex,
+          endIndex: firstArg.endIndex,
+        },
+      };
+    }
+  }
+
+  return null;
+}
 
 function positionToOffset(text: string, position: Position): number {
   let offset = 0;
@@ -466,15 +674,15 @@ function isKsrTmCallbackMethod(funcNode: SyntaxNode): boolean {
   );
 }
 
-function extractCallbackRegistrations(tree: Tree): CallbackReference[] {
+function extractCallbackRegistrations(tree: Tree, constants: StringConstants): CallbackReference[] {
   const refs: CallbackReference[] = [];
-  walkForCallbacks(tree.rootNode, refs);
+  walkForCallbacks(tree.rootNode, refs, constants);
   return refs;
 }
 
-function walkForCallbacks(node: SyntaxNode, refs: CallbackReference[]): void {
+function walkForCallbacks(node: SyntaxNode, refs: CallbackReference[], constants: StringConstants): void {
   if (node.type === 'call') {
-    const ref = tryExtractCallback(node);
+    const ref = tryExtractCallback(node, constants);
     if (ref) {
       refs.push(ref);
       return;
@@ -482,38 +690,25 @@ function walkForCallbacks(node: SyntaxNode, refs: CallbackReference[]): void {
   }
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i);
-    if (child) walkForCallbacks(child, refs);
+    if (child) walkForCallbacks(child, refs, constants);
   }
 }
 
-function tryExtractCallback(callNode: SyntaxNode): CallbackReference | null {
+function tryExtractCallback(callNode: SyntaxNode, constants: StringConstants): CallbackReference | null {
   const funcNode = callNode.childForFieldName('function');
   if (!funcNode || !isKsrTmCallbackMethod(funcNode)) return null;
 
   const methodId = funcNode.childForFieldName('attribute')!;
-
   const argsNode = callNode.childForFieldName('arguments');
   if (!argsNode) return null;
 
-  let firstArg: SyntaxNode | null = null;
-  for (let i = 0; i < argsNode.namedChildCount; i++) {
-    firstArg = argsNode.namedChild(i);
-    break;
-  }
-  if (!firstArg || firstArg.type !== 'string') return null;
-
-  const contentNode = firstArg.namedChildren.find((c) => c.type === 'string_content');
-  if (!contentNode) return null;
+  const resolved = resolveFirstStringArg(argsNode, constants);
+  if (!resolved) return null;
 
   return {
-    name: contentNode.text,
+    name: resolved.value,
     method: methodId.text,
-    nameRange: {
-      startPosition: contentNode.startPosition,
-      endPosition: contentNode.endPosition,
-      startIndex: contentNode.startIndex,
-      endIndex: contentNode.endIndex,
-    },
+    nameRange: resolved.range,
   };
 }
 
@@ -532,15 +727,15 @@ function isKsrHtableMethod(funcNode: SyntaxNode): boolean {
   );
 }
 
-function extractHtableReferences(tree: Tree): HtableReference[] {
+function extractHtableReferences(tree: Tree, constants: StringConstants): HtableReference[] {
   const refs: HtableReference[] = [];
-  walkForHtableCalls(tree.rootNode, refs);
+  walkForHtableCalls(tree.rootNode, refs, constants);
   return refs;
 }
 
-function walkForHtableCalls(node: SyntaxNode, refs: HtableReference[]): void {
+function walkForHtableCalls(node: SyntaxNode, refs: HtableReference[], constants: StringConstants): void {
   if (node.type === 'call') {
-    const ref = tryExtractHtableCall(node);
+    const ref = tryExtractHtableCall(node, constants);
     if (ref) {
       refs.push(ref);
       return;
@@ -548,33 +743,77 @@ function walkForHtableCalls(node: SyntaxNode, refs: HtableReference[]): void {
   }
   for (let i = 0; i < node.childCount; i++) {
     const child = node.child(i);
-    if (child) walkForHtableCalls(child, refs);
+    if (child) walkForHtableCalls(child, refs, constants);
   }
 }
 
-function tryExtractHtableCall(callNode: SyntaxNode): HtableReference | null {
+function tryExtractHtableCall(callNode: SyntaxNode, constants: StringConstants): HtableReference | null {
   const funcNode = callNode.childForFieldName('function');
   if (!funcNode || !isKsrHtableMethod(funcNode)) return null;
 
   const methodId = funcNode.childForFieldName('attribute')!;
-
   const argsNode = callNode.childForFieldName('arguments');
   if (!argsNode) return null;
 
-  const firstArg = argsNode.namedChild(0);
-  if (!firstArg || firstArg.type !== 'string') return null;
-
-  const contentNode = firstArg.namedChildren.find((c) => c.type === 'string_content');
-  if (!contentNode) return null;
+  const resolved = resolveFirstStringArg(argsNode, constants);
+  if (!resolved) return null;
 
   return {
-    tableName: contentNode.text,
+    tableName: resolved.value,
     method: methodId.text,
-    nameRange: {
-      startPosition: contentNode.startPosition,
-      endPosition: contentNode.endPosition,
-      startIndex: contentNode.startIndex,
-      endIndex: contentNode.endIndex,
-    },
+    nameRange: resolved.range,
+  };
+}
+
+function isKsrHdrMethod(funcNode: SyntaxNode): boolean {
+  if (funcNode.type !== 'attribute') return false;
+  const methodId = funcNode.childForFieldName('attribute');
+  if (!methodId || !HDR_METHODS.has(methodId.text)) return false;
+
+  const obj = funcNode.childForFieldName('object');
+  if (!obj || obj.type !== 'attribute') return false;
+  const hdrId = obj.childForFieldName('attribute');
+  const ksrId = obj.childForFieldName('object');
+  return (
+    !!ksrId && ksrId.type === 'identifier' && ksrId.text === 'KSR' &&
+    !!hdrId && hdrId.type === 'identifier' && hdrId.text === 'hdr'
+  );
+}
+
+function extractHdrReferences(tree: Tree, constants: StringConstants): HdrReference[] {
+  const refs: HdrReference[] = [];
+  walkForHdrCalls(tree.rootNode, refs, constants);
+  return refs;
+}
+
+function walkForHdrCalls(node: SyntaxNode, refs: HdrReference[], constants: StringConstants): void {
+  if (node.type === 'call') {
+    const ref = tryExtractHdrCall(node, constants);
+    if (ref) {
+      refs.push(ref);
+      return;
+    }
+  }
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child) walkForHdrCalls(child, refs, constants);
+  }
+}
+
+function tryExtractHdrCall(callNode: SyntaxNode, constants: StringConstants): HdrReference | null {
+  const funcNode = callNode.childForFieldName('function');
+  if (!funcNode || !isKsrHdrMethod(funcNode)) return null;
+
+  const methodId = funcNode.childForFieldName('attribute')!;
+  const argsNode = callNode.childForFieldName('arguments');
+  if (!argsNode) return null;
+
+  const resolved = resolveFirstStringArg(argsNode, constants);
+  if (!resolved) return null;
+
+  return {
+    headerName: resolved.value,
+    method: methodId.text,
+    nameRange: resolved.range,
   };
 }

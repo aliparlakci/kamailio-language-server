@@ -681,3 +681,84 @@ describe('E2E: Htable tracking', () => {
     expect(diags.filter(d => d.code === 'htable-never-set')).toHaveLength(0);
   });
 });
+
+describe('E2E: SIP header completions', () => {
+  it('suggests standard SIP headers inside KSR.hdr.get', async () => {
+    const uri = 'file:///test/hdr_comp.py';
+    await client.openDocument(uri, 'KSR.hdr.get("")');
+    // char 13 is between the quotes
+    const items = await client.getCompletions(uri, 0, 13);
+    expect(items.some(c => c.label === 'Via')).toBe(true);
+    expect(items.some(c => c.label === 'From')).toBe(true);
+    expect(items.some(c => c.label === 'To')).toBe(true);
+    expect(items.some(c => c.label === 'Call-ID')).toBe(true);
+    expect(items.some(c => c.label === 'Route')).toBe(true);
+  });
+
+  it('suggests standard SIP headers inside KSR.hdr.is_present', async () => {
+    const uri = 'file:///test/hdr_present.py';
+    await client.openDocument(uri, 'KSR.hdr.is_present("")');
+    // char 20 is between the quotes
+    const items = await client.getCompletions(uri, 0, 20);
+    expect(items.some(c => c.label === 'Reason')).toBe(true);
+    expect(items.some(c => c.label === 'Contact')).toBe(true);
+  });
+
+  it('also suggests custom headers seen in the workspace', async () => {
+    const uri1 = 'file:///test/hdr_custom_def.py';
+    const uri2 = 'file:///test/hdr_custom_use.py';
+    await client.openDocument(uri1, 'KSR.hdr.get("X-My-Custom-Header")');
+    await client.openDocument(uri2, 'KSR.hdr.get("")');
+    const items = await client.getCompletions(uri2, 0, 13);
+    expect(items.some(c => c.label === 'X-My-Custom-Header')).toBe(true);
+  });
+
+  it('returns hover for standard SIP header', async () => {
+    const uri = 'file:///test/hdr_hover.py';
+    await client.openDocument(uri, 'KSR.hdr.get("Via")');
+    // char 14 is inside "Via"
+    const hover = await client.getHover(uri, 0, 14);
+    expect(hover).not.toBeNull();
+    const content = (hover!.contents as any).value;
+    expect(content).toContain('Via');
+  });
+
+  it('finds all references for a header name across documents', async () => {
+    const uri1 = 'file:///test/hdr_ref_a.py';
+    const uri2 = 'file:///test/hdr_ref_b.py';
+    await client.openDocument(uri1, 'KSR.hdr.get("Reason")');
+    await client.openDocument(uri2, 'KSR.hdr.is_present("Reason")');
+    // char 14 is inside "Reason" on uri1
+    const refs = await client.getReferences(uri1, 0, 14);
+    expect(refs.length).toBe(2);
+    const uris = refs.map(r => r.uri).sort();
+    expect(uris).toEqual([uri1, uri2]);
+  });
+
+  it('resolves constants used as header names', async () => {
+    const uri1 = 'file:///test/hdr_const.py';
+    const uri2 = 'file:///test/hdr_const_comp.py';
+    const code = [
+      'MY_HEADER = "X-Custom-Auth"',
+      'KSR.hdr.get(MY_HEADER)',
+    ].join('\n');
+    await client.openDocument(uri1, code);
+    await client.openDocument(uri2, 'KSR.hdr.get("")');
+    // "X-Custom-Auth" should appear in completions from constant resolution
+    const items = await client.getCompletions(uri2, 0, 13);
+    expect(items.some(c => c.label === 'X-Custom-Auth')).toBe(true);
+  });
+
+  it('resolves constants used as htable table names', async () => {
+    const uri1 = 'file:///test/ht_const.py';
+    const uri2 = 'file:///test/ht_const_comp.py';
+    const code = [
+      'TABLE_NAME = "MyTable"',
+      'KSR.htable.sht_get(TABLE_NAME, key)',
+    ].join('\n');
+    await client.openDocument(uri1, code);
+    await client.openDocument(uri2, 'KSR.htable.sht_get("")');
+    const items = await client.getCompletions(uri2, 0, 20);
+    expect(items.some(c => c.label === 'MyTable')).toBe(true);
+  });
+});
