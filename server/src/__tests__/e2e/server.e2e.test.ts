@@ -208,3 +208,150 @@ describe('E2E: Incremental Updates', () => {
     expect(diags.filter(d => d.code === 'undefined-pv')).toHaveLength(0);
   });
 });
+
+describe('E2E: Cross-file PV resolution', () => {
+  it('no warning when variable is set in another open file', async () => {
+    const setterUri = 'file:///test/cross/setter.py';
+    const readerUri = 'file:///test/cross/reader.py';
+
+    await client.openDocument(setterUri, 'KSR.pv.sets("$var(cross_file)", "val")');
+    await client.openDocument(readerUri, 'x = KSR.pv.get("$var(cross_file)")');
+
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(readerUri);
+    expect(diags.filter(d => d.code === 'undefined-pv')).toHaveLength(0);
+  });
+
+  it('warns when variable is set nowhere across all files', async () => {
+    const uri = 'file:///test/cross/lonely.py';
+    await client.openDocument(uri, 'x = KSR.pv.get("$var(truly_missing)")');
+    const diags = await client.waitForDiagnostics(uri);
+    expect(diags.some(d => d.code === 'undefined-pv')).toBe(true);
+  });
+});
+
+describe('E2E: Call chain analysis', () => {
+  it('no warning when variable is set through a direct call chain', async () => {
+    // helpers.py defines a function that sets a variable
+    const helpersUri = 'file:///test/chain/helpers.py';
+    await client.openDocument(helpersUri, [
+      'def setup_vars():',
+      '    KSR.pv.sets("$var(from_helper)", "val")',
+    ].join('\n'));
+
+    // main.py calls setup_vars() and reads the variable
+    const mainUri = 'file:///test/chain/main.py';
+    await client.openDocument(mainUri, [
+      'from helpers import setup_vars',
+      '',
+      'def ksr_request_route(msg):',
+      '    setup_vars()',
+      '    val = KSR.pv.get("$var(from_helper)")',
+    ].join('\n'));
+
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(mainUri);
+    expect(diags.filter(d => d.code === 'undefined-pv')).toHaveLength(0);
+  });
+
+  it('no warning when variable is set through a transitive call chain', async () => {
+    // deep.py sets the variable
+    const deepUri = 'file:///test/chain2/deep.py';
+    await client.openDocument(deepUri, [
+      'def set_deep():',
+      '    KSR.pv.sets("$var(deep_var)", "deep_val")',
+    ].join('\n'));
+
+    // middle.py calls deep
+    const middleUri = 'file:///test/chain2/middle.py';
+    await client.openDocument(middleUri, [
+      'from deep import set_deep',
+      '',
+      'def middle_func():',
+      '    set_deep()',
+    ].join('\n'));
+
+    // top.py calls middle and reads the variable
+    const topUri = 'file:///test/chain2/top.py';
+    await client.openDocument(topUri, [
+      'from middle import middle_func',
+      '',
+      'def ksr_request_route(msg):',
+      '    middle_func()',
+      '    val = KSR.pv.get("$var(deep_var)")',
+    ].join('\n'));
+
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(topUri);
+    expect(diags.filter(d => d.code === 'undefined-pv')).toHaveLength(0);
+  });
+
+  it('no warning when variable is set in same-file helper function', async () => {
+    const uri = 'file:///test/chain/samefile.py';
+    await client.openDocument(uri, [
+      'def init_vars():',
+      '    KSR.pv.sets("$var(local_chain)", "val")',
+      '',
+      'def ksr_request_route(msg):',
+      '    init_vars()',
+      '    val = KSR.pv.get("$var(local_chain)")',
+    ].join('\n'));
+
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(uri);
+    expect(diags.filter(d => d.code === 'undefined-pv')).toHaveLength(0);
+  });
+
+  it('completions include variables set through call chains', async () => {
+    // A helper sets variables
+    const helperUri = 'file:///test/chain_comp/helper.py';
+    await client.openDocument(helperUri, [
+      'def setup():',
+      '    KSR.pv.sets("$var(chain_complete)", "val")',
+    ].join('\n'));
+
+    // Main file has an empty get
+    const mainUri = 'file:///test/chain_comp/main.py';
+    await client.openDocument(mainUri, 'x = KSR.pv.get("$var()")');
+    const items = await client.getCompletions(mainUri, 0, 21);
+    expect(items.some(c => c.label === 'chain_complete')).toBe(true);
+  });
+});
+
+describe('E2E: Multiple PV types across files', () => {
+  it('tracks $shv variables across files', async () => {
+    const setUri = 'file:///test/shv/setter.py';
+    const getUri = 'file:///test/shv/reader.py';
+
+    await client.openDocument(setUri, 'KSR.pv.sets("$shv(global_counter)", "0")');
+    await client.openDocument(getUri, 'x = KSR.pv.get("$shv(global_counter)")');
+
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(getUri);
+    expect(diags.filter(d => d.code === 'undefined-pv')).toHaveLength(0);
+  });
+
+  it('tracks $avp variables across files', async () => {
+    const setUri = 'file:///test/avp/setter.py';
+    const getUri = 'file:///test/avp/reader.py';
+
+    await client.openDocument(setUri, 'KSR.pv.sets("$avp(auth_user)", "alice")');
+    await client.openDocument(getUri, 'x = KSR.pv.get("$avp(auth_user)")');
+
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(getUri);
+    expect(diags.filter(d => d.code === 'undefined-pv')).toHaveLength(0);
+  });
+
+  it('$var and $shv with same name are distinct', async () => {
+    const uri = 'file:///test/distinct/vars.py';
+    await client.openDocument(uri, [
+      'KSR.pv.sets("$var(x)", "val")',
+      'y = KSR.pv.get("$shv(x)")',
+    ].join('\n'));
+
+    const diags = await client.waitForDiagnostics(uri);
+    // $shv(x) was never set — only $var(x) was
+    expect(diags.some(d => d.code === 'undefined-pv' && d.message.includes('$shv(x)'))).toBe(true);
+  });
+});
