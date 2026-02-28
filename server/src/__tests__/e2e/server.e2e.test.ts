@@ -612,6 +612,36 @@ describe('E2E: Callback function validation', () => {
     expect(items.some(c => c.label === 'ksr_failure_manage')).toBe(true);
     expect(items.some(c => c.label === 'ksr_on_branch_auth')).toBe(true);
   });
+
+  it('suggests class methods as callback completions', async () => {
+    const uri = 'file:///test/cb_class_comp.py';
+    const code = [
+      'class Kamailio:',
+      '    def ksr_class_handler(self):',
+      '        pass',
+      '',
+      '    def route(self):',
+      '        KSR.tm.t_on_failure("")',
+    ].join('\n');
+    await client.openDocument(uri, code);
+    // char 29 is between quotes on line 5: '        KSR.tm.t_on_failure("")'
+    const items = await client.getCompletions(uri, 5, 29);
+    expect(items.some(c => c.label === 'ksr_class_handler')).toBe(true);
+  });
+
+  it('resolves constant as callback name', async () => {
+    const defUri = 'file:///test/cb_const_def.py';
+    const useUri = 'file:///test/cb_const_use.py';
+    await client.openDocument(defUri, [
+      'FAILURE_CB = "ksr_my_failure_handler"',
+      'def ksr_my_failure_handler():',
+      '    pass',
+    ].join('\n'));
+    await client.openDocument(useUri, 'KSR.tm.t_on_failure(FAILURE_CB)');
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(useUri);
+    expect(diags.filter(d => d.code === 'undefined-callback')).toHaveLength(0);
+  });
 });
 
 describe('E2E: Htable tracking', () => {
@@ -680,6 +710,36 @@ describe('E2E: Htable tracking', () => {
     const diags = client.getDiagnostics(uri2);
     expect(diags.filter(d => d.code === 'htable-never-set')).toHaveLength(0);
   });
+
+  it('resolves constant as htable table name for diagnostics', async () => {
+    const uri = 'file:///test/ht_const_diag.py';
+    const code = [
+      'TABLE = "ConstTable"',
+      'KSR.htable.sht_get(TABLE, key)',
+    ].join('\n');
+    await client.openDocument(uri, code);
+    const diags = await client.waitForDiagnostics(uri);
+    // Should warn — ConstTable is read but never written
+    expect(diags.some(d => d.code === 'htable-never-set')).toBe(true);
+  });
+
+  it('does not warn when constant-resolved htable is written', async () => {
+    const uri1 = 'file:///test/ht_const_write.py';
+    const uri2 = 'file:///test/ht_const_read.py';
+    const code1 = [
+      'TBL = "ConstWriteTable"',
+      'KSR.htable.sht_sets(TBL, key, val)',
+    ].join('\n');
+    await client.openDocument(uri1, code1);
+    const code2 = [
+      'TBL = "ConstWriteTable"',
+      'KSR.htable.sht_get(TBL, key)',
+    ].join('\n');
+    await client.openDocument(uri2, code2);
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(uri2);
+    expect(diags.filter(d => d.code === 'htable-never-set')).toHaveLength(0);
+  });
 });
 
 describe('E2E: SIP header completions', () => {
@@ -721,6 +781,36 @@ describe('E2E: SIP header completions', () => {
     expect(hover).not.toBeNull();
     const content = (hover!.contents as any).value;
     expect(content).toContain('Via');
+    expect(content).toContain('RFC 3261');
+  });
+
+  it('returns hover for custom SIP header', async () => {
+    const uri = 'file:///test/hdr_hover_custom.py';
+    await client.openDocument(uri, 'KSR.hdr.get("X-My-App-Header")');
+    const hover = await client.getHover(uri, 0, 14);
+    expect(hover).not.toBeNull();
+    const content = (hover!.contents as any).value;
+    expect(content).toContain('X-My-App-Header');
+    expect(content).toContain('Custom SIP header');
+  });
+
+  it('suggests headers inside KSR.hdr.remove', async () => {
+    const uri = 'file:///test/hdr_remove.py';
+    await client.openDocument(uri, 'KSR.hdr.remove("")');
+    // KSR.hdr.remove("") — char 16 between quotes
+    const items = await client.getCompletions(uri, 0, 16);
+    expect(items.some(c => c.label === 'Route')).toBe(true);
+  });
+
+  it('resolves attribute access as header name', async () => {
+    const defUri = 'file:///test/hdr_attr_def.py';
+    const useUri = 'file:///test/hdr_attr_use.py';
+    await client.openDocument(defUri, 'VOICE_HDR = "X-Voice-Account"');
+    await client.openDocument(useUri, 'KSR.hdr.get(Headers.VOICE_HDR)');
+    const compUri = 'file:///test/hdr_attr_comp.py';
+    await client.openDocument(compUri, 'KSR.hdr.get("")');
+    const items = await client.getCompletions(compUri, 0, 13);
+    expect(items.some(c => c.label === 'X-Voice-Account')).toBe(true);
   });
 
   it('finds all references for a header name across documents', async () => {
@@ -1042,5 +1132,48 @@ describe('E2E: Statistics validation from kamailio.cfg', () => {
     await new Promise(r => setTimeout(r, 500));
     const diags = statClient.getDiagnostics(useUri);
     expect(diags.filter(d => d.code === 'undeclared-stat')).toHaveLength(0);
+  });
+
+  it('go-to-definition navigates to kamailio.cfg declaration', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_goto.py');
+    await statClient.openDocument(uri, 'KSR.statistics.update_stat("invite", 1)');
+    // char 30 is inside "invite"
+    const defs = await statClient.getDefinitions(uri, 0, 30);
+    expect(defs.length).toBeGreaterThan(0);
+    expect(defs[0].uri).toContain('kamailio.cfg');
+  });
+
+  it('returns hover for declared stat name', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_hover.py');
+    await statClient.openDocument(uri, 'KSR.statistics.update_stat("invite", 1)');
+    const hover = await statClient.getHover(uri, 0, 30);
+    expect(hover).not.toBeNull();
+    const content = (hover!.contents as any).value;
+    expect(content).toContain('invite');
+    expect(content).toContain('Declared in kamailio.cfg');
+  });
+
+  it('returns semantic tokens for declared stat names', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_tokens.py');
+    await statClient.openDocument(uri, 'KSR.statistics.update_stat("invite", 1)');
+    const tokens = await statClient.getSemanticTokens(uri);
+    expect(tokens).not.toBeNull();
+    expect(tokens!.data.length).toBeGreaterThan(0);
+  });
+
+  it('resolves integer constants through alias chains', async () => {
+    const constUri = 'file://' + path.join(tmpDir, 'int_consts.py');
+    await statClient.openDocument(constUri, 'SIP_ERROR_502 = 502');
+    const defUri = 'file://' + path.join(tmpDir, 'int_alias.py');
+    await statClient.openDocument(defUri, 'NO_DEST = SIP_ERROR_502');
+    const useUri = 'file://' + path.join(tmpDir, 'int_use.py');
+    await statClient.openDocument(useUri,
+      'KSR.statistics.update_stat(f"rejected_calls_{NO_DEST}", 1)');
+    const diags = await statClient.waitForDiagnostics(useUri);
+    // Resolves to "rejected_calls_502" — not declared, but verifies chain resolved
+    // (502 is not in cfg, but the important thing is it DID resolve, not skip)
+    expect(diags.some(d =>
+      d.code === 'undeclared-stat' && d.message.includes('rejected_calls_502')
+    )).toBe(true);
   });
 });
