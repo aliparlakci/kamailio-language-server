@@ -88,7 +88,7 @@
     "compile:server": "tsc -p server/tsconfig.json",
     "bundle": "npm run bundle:client && npm run bundle:server",
     "bundle:client": "esbuild client/src/extension.ts --bundle --outfile=client/out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
-    "bundle:server": "esbuild server/src/server.ts --bundle --outfile=server/out/server.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "bundle:server": "esbuild server/src/server.ts --bundle --outfile=server/out/server.js --external:vscode --format=cjs --platform=node --sourcemap && cp node_modules/web-tree-sitter/tree-sitter.wasm server/out/ 2>/dev/null || cp server/node_modules/web-tree-sitter/tree-sitter.wasm server/out/ 2>/dev/null",
     "watch": "concurrently \"npm run watch:client\" \"npm run watch:server\"",
     "watch:client": "tsc -w -p client/tsconfig.json",
     "watch:server": "tsc -w -p server/tsconfig.json",

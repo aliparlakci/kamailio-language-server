@@ -24,6 +24,7 @@ cp package.json "$EXTENSION_DIR/"
 cp client/out/extension.js "$EXTENSION_DIR/client/out/"
 cp client/package.json "$EXTENSION_DIR/client/"
 cp server/out/server.js "$EXTENSION_DIR/server/out/"
+cp server/out/tree-sitter.wasm "$EXTENSION_DIR/server/out/"
 cp server/package.json "$EXTENSION_DIR/server/"
 cp server/wasm/tree-sitter-python.wasm "$EXTENSION_DIR/server/wasm/"
 

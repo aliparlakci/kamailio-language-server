@@ -27,6 +27,7 @@ check_file() {
 
 check_file "client/out/extension.js" 10000
 check_file "server/out/server.js" 10000
+check_file "server/out/tree-sitter.wasm" 100000
 
 # Step 3: Check WASM
 echo ""
