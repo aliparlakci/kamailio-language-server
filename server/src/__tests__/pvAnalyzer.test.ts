@@ -1,16 +1,12 @@
 import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import Parser from 'web-tree-sitter';
-import * as path from 'path';
 import { PvAnalyzer } from '../analyzers/pvAnalyzer/index';
+import { createTestParser } from './helpers/treeSitter';
 
 let parser: Parser;
 
 beforeAll(async () => {
-  await Parser.init();
-  const wasmPath = path.join(__dirname, '..', '..', 'wasm', 'tree-sitter-python.wasm');
-  const Python = await Parser.Language.load(wasmPath);
-  parser = new Parser();
-  parser.setLanguage(Python);
+  parser = await createTestParser();
 });
 
 function makeAnalyzer() {

@@ -1,18 +1,14 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import Parser from 'web-tree-sitter';
-import * as path from 'path';
 import { CallGraph } from '../analyzers/callGraphAnalyzer/callGraph';
 import { ImportResolver } from '../analyzers/callGraphAnalyzer/importResolver';
 import { extractFunctions } from '../analyzers/callGraphAnalyzer/functionExtractor';
+import { createTestParser } from './helpers/treeSitter';
 
 let parser: Parser;
 
 beforeAll(async () => {
-  await Parser.init();
-  const wasmPath = path.join(__dirname, '..', '..', 'wasm', 'tree-sitter-python.wasm');
-  const Python = await Parser.Language.load(wasmPath);
-  parser = new Parser();
-  parser.setLanguage(Python);
+  parser = await createTestParser();
 });
 
 describe('CallGraph', () => {

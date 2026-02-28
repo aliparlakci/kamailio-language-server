@@ -26,6 +26,9 @@ jobs:
       - name: Copy WASM
         run: npm run copy-wasm
 
+      - name: Copy WASM
+        run: npm run copy-wasm
+
       - name: Compile
         run: npm run compile
 
