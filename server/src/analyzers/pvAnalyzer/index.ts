@@ -105,10 +105,11 @@ export class PvAnalyzer implements Analyzer {
           tokenModifiers: 0,
         });
         if (occ.pv.innerName) {
+          // Include closing ) in the name token so it doesn't fall back to string color
           tokens.push({
             line: occ.range.startPosition.row,
             char: occ.range.startPosition.column + classLen,
-            length: occ.pv.innerName.length,
+            length: occ.pv.innerName.length + 1, // +1 for )
             tokenType: TOKEN_TYPE_PV_NAME,
             tokenModifiers: occ.isWrite ? MODIFIER_WRITE : 0,
           });
