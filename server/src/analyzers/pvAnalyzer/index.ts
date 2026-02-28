@@ -4,9 +4,13 @@ import {
   Diagnostic,
   DiagnosticSeverity,
   Hover,
+  InsertTextFormat,
   Location,
   MarkupKind,
   Position,
+  Range,
+  TextEdit,
+  Command,
 } from 'vscode-languageserver';
 import {
   Analyzer,
@@ -116,7 +120,6 @@ export class PvAnalyzer implements Analyzer {
   }
 
   getCompletions(doc: DocumentContext, position: Position): CompletionItem[] {
-    // Check if cursor is inside a string argument of a KSR.pv.* call
     const node = doc.tree.rootNode.descendantForPosition({
       row: position.line,
       column: position.character,
@@ -125,7 +128,7 @@ export class PvAnalyzer implements Analyzer {
 
     // Check if we're inside a string within a KSR.pv call
     if (this.isInsideKsrPvString(node)) {
-      return this.getPvCompletions();
+      return this.getPvCompletions(doc, position, node);
     }
 
     // Check if we're completing a KSR.pv method name
@@ -353,11 +356,63 @@ export class PvAnalyzer implements Analyzer {
     );
   }
 
-  private getPvCompletions(): CompletionItem[] {
+  private getPvCompletions(doc: DocumentContext, position: Position, node: SyntaxNode): CompletionItem[] {
+    // Find the string_content node to get the text typed so far
+    const contentNode = node.type === 'string_content' ? node
+      : node.type === 'string' ? node.namedChildren.find((c) => c.type === 'string_content')
+      : null;
+
+    if (!contentNode) return [];
+
+    const stringStart = contentNode.startPosition;
+    const fullText = contentNode.text;
+    // How far into the string content the cursor is
+    const cursorCol = position.character - stringStart.column;
+    const typed = fullText.substring(0, cursorCol);
+
+    // Determine what the user has typed: find the last '$' before cursor
+    const dollarIdx = typed.lastIndexOf('$');
+    if (dollarIdx === -1) {
+      // No '$' typed yet — no PV completions
+      return [];
+    }
+
+    const afterDollar = typed.substring(dollarIdx + 1); // e.g., "va", "var(call", "r"
+    const openParenIdx = afterDollar.indexOf('(');
+
+    // Range from the '$' to the cursor — this is what we'll replace
+    const replaceStart: Position = {
+      line: position.line,
+      character: stringStart.column + dollarIdx,
+    };
+    const replaceRange: Range = {
+      start: replaceStart,
+      end: position,
+    };
+
+    if (openParenIdx !== -1) {
+      // User typed something like "$var(call" — we're completing the variable NAME
+      const pvClass = afterDollar.substring(0, openParenIdx); // "var"
+      const namePrefix = afterDollar.substring(openParenIdx + 1); // "call"
+
+      // Range from after the '(' to cursor
+      const nameReplaceStart: Position = {
+        line: position.line,
+        character: stringStart.column + dollarIdx + 1 + openParenIdx + 1,
+      };
+      const nameReplaceRange: Range = {
+        start: nameReplaceStart,
+        end: position,
+      };
+
+      return this.getVariableNameCompletions(pvClass, namePrefix, nameReplaceRange);
+    }
+
+    // User typed "$" or "$va" etc — completing the PV class/builtin
     const items: CompletionItem[] = [];
     const seen = new Set<string>();
 
-    // Built-in bare PVs
+    // Built-in bare PVs (e.g., $ru, $fu)
     for (const builtin of BUILTIN_PVS) {
       if (builtin.isBare) {
         items.push({
@@ -368,12 +423,14 @@ export class PvAnalyzer implements Analyzer {
             kind: MarkupKind.Markdown,
             value: `**${builtin.template}**\n\n${builtin.description}\n\nCategory: \`${builtin.category}\`${builtin.isReadOnly ? '\n\n*Read-only*' : ''}`,
           },
+          filterText: builtin.template,
+          textEdit: TextEdit.replace(replaceRange, builtin.template),
         });
         seen.add(builtin.template);
       }
     }
 
-    // Built-in class PV prefixes
+    // Class PV prefixes (e.g., $var(, $shv() — insert $var() with cursor inside
     for (const builtin of BUILTIN_PVS) {
       if (!builtin.isBare) {
         const prefix = `$${builtin.pvClass}(`;
@@ -382,14 +439,20 @@ export class PvAnalyzer implements Analyzer {
             label: prefix,
             kind: CompletionItemKind.Class,
             detail: builtin.description,
-            insertText: `$${builtin.pvClass}($1)`,
+            filterText: prefix,
+            textEdit: TextEdit.replace(replaceRange, `$${builtin.pvClass}()`),
+            // After inserting $var(), re-trigger completion for the name
+            command: {
+              title: 'Trigger variable name completion',
+              command: 'editor.action.triggerSuggest',
+            },
           });
           seen.add(prefix);
         }
       }
     }
 
-    // User-defined variables from the index
+    // User-defined complete variables (e.g., $var(caller))
     for (const index of this.indices.values()) {
       for (const key of index.getAllIdentities()) {
         const parts = key.split(':');
@@ -401,8 +464,37 @@ export class PvAnalyzer implements Analyzer {
               label: template,
               kind: CompletionItemKind.Variable,
               detail: `User-defined ${pvClass} variable`,
+              filterText: template,
+              textEdit: TextEdit.replace(replaceRange, template),
             });
             seen.add(template);
+          }
+        }
+      }
+    }
+
+    return items;
+  }
+
+  private getVariableNameCompletions(pvClass: string, namePrefix: string, replaceRange: Range): CompletionItem[] {
+    const items: CompletionItem[] = [];
+    const seen = new Set<string>();
+
+    // Gather all known names for this PV class from across all documents
+    for (const index of this.indices.values()) {
+      for (const key of index.getAllIdentities()) {
+        const parts = key.split(':');
+        if (parts.length === 2 && parts[0] === pvClass) {
+          const name = parts[1];
+          if (!seen.has(name)) {
+            items.push({
+              label: name,
+              kind: CompletionItemKind.Variable,
+              detail: `${pvClass} variable`,
+              filterText: name,
+              textEdit: TextEdit.replace(replaceRange, name),
+            });
+            seen.add(name);
           }
         }
       }
