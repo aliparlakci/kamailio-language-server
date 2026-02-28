@@ -73,6 +73,20 @@ describe('E2E: Completions', () => {
     expect(items.some(c => c.label === 'counter')).toBe(true);
   });
 
+  it('does not suggest variables that are only read, never set', async () => {
+    const defUri = 'file:///test/comp_filter_defs.py';
+    await client.openDocument(defUri, [
+      'KSR.pv.sets("$var(defined_var)", "val")',
+      'x = KSR.pv.get("$var(only_read)")',
+    ].join('\n'));
+
+    const uri = 'file:///test/comp_filter.py';
+    await client.openDocument(uri, 'KSR.pv.get("$var()")');
+    const items = await client.getCompletions(uri, 0, 17);
+    expect(items.some(c => c.label === 'defined_var')).toBe(true);
+    expect(items.some(c => c.label === 'only_read')).toBe(false);
+  });
+
   it('$var( completion snippet does not contain double dollar', async () => {
     const uri = 'file:///test/comp_snippet.py';
     await client.openDocument(uri, 'KSR.pv.get("$")');

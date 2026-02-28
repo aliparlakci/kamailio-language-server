@@ -493,11 +493,13 @@ export class PvAnalyzer implements Analyzer {
       }
     }
 
-    // User-defined complete variables (e.g., $var(caller))
+    // User-defined complete variables (e.g., $var(caller)) — only those that have been set
     for (const index of this.indices.values()) {
       for (const key of index.getAllIdentities()) {
         const parts = key.split(':');
         if (parts.length === 2) {
+          // Only suggest variables that have been written somewhere in the workspace
+          if (!this.hasWriteForKey(key)) continue;
           const [pvClass, name] = parts;
           const template = `$${pvClass}(${name})`;
           if (!seen.has(template)) {
@@ -525,6 +527,8 @@ export class PvAnalyzer implements Analyzer {
       for (const key of index.getAllIdentities()) {
         const parts = key.split(':');
         if (parts.length === 2 && parts[0] === pvClass) {
+          // Only suggest variables that have been set somewhere
+          if (!this.hasWriteForKey(key)) continue;
           const name = parts[1];
           if (!seen.has(name)) {
             items.push({
@@ -541,6 +545,13 @@ export class PvAnalyzer implements Analyzer {
     }
 
     return items;
+  }
+
+  private hasWriteForKey(key: string): boolean {
+    for (const index of this.indices.values()) {
+      if (index.getAllWrites(key).length > 0) return true;
+    }
+    return false;
   }
 
   private positionToOffset(text: string, position: Position): number {
