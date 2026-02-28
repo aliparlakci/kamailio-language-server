@@ -162,7 +162,7 @@ export class PvAnalyzer implements Analyzer {
       // Check for unknown PV classes
       if (!BUILTIN_PV_CLASSES.has(occ.pv.pvClass)) {
         diags.push({
-          severity: DiagnosticSeverity.Warning,
+          severity: DiagnosticSeverity.Error,
           range: {
             start: { line: occ.range.startPosition.row, character: occ.range.startPosition.column },
             end: { line: occ.range.endPosition.row, character: occ.range.endPosition.column },

@@ -35,12 +35,14 @@ function docContext(uri: string, code: string) {
 }
 
 describe('PvAnalyzer - Diagnostics', () => {
-  it('warns on unknown PV class', () => {
+  it('reports unknown PV class as error', () => {
     const analyzer = makeAnalyzer();
     const code = 'KSR.pv.get("$fake_thing(oops)")';
     const tree = analyzeCode(analyzer, 'test://a.py', code);
     const diags = analyzer.getDiagnostics({ uri: 'test://a.py', tree, fullText: code });
-    expect(diags.some(d => d.message.includes('Unknown pseudo-variable'))).toBe(true);
+    const unknownDiag = diags.find(d => d.message.includes('Unknown pseudo-variable'));
+    expect(unknownDiag).toBeDefined();
+    expect(unknownDiag!.severity).toBe(1); // DiagnosticSeverity.Error = 1
   });
 
   it('does not warn on known bare PVs', () => {

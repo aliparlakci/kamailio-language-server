@@ -12,11 +12,13 @@ afterAll(async () => {
 });
 
 describe('E2E: Diagnostics', () => {
-  it('reports unknown pseudo-variable', async () => {
+  it('reports unknown pseudo-variable as error', async () => {
     const uri = 'file:///test/diag_unknown.py';
     await client.openDocument(uri, 'KSR.pv.get("$fake_thing(oops)")');
     const diags = await client.waitForDiagnostics(uri);
-    expect(diags.some(d => d.message.includes('Unknown pseudo-variable'))).toBe(true);
+    const unknownDiag = diags.find(d => d.message.includes('Unknown pseudo-variable'));
+    expect(unknownDiag).toBeDefined();
+    expect(unknownDiag!.severity).toBe(1); // DiagnosticSeverity.Error = 1
   });
 
   it('reports variable read but never set', async () => {
