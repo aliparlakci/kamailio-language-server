@@ -3,7 +3,7 @@
   "displayName": "Kamailio KEMI Language Server",
   "description": "Language support for Kamailio KEMI Python scripts — pseudo-variable highlighting, completion, diagnostics, and navigation",
   "version": "0.1.0",
-  "publisher": "aliparlakci",
+  "publisher": "parlakci",
   "license": "MIT",
   "repository": {
     "type": "git",
