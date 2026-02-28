@@ -164,7 +164,28 @@ export class CallGraphAnalyzer implements Analyzer {
 
   // --- Analyzer interface ---
 
-  getSemanticTokens(_doc: DocumentContext): SemanticTokenData[] { return []; }
+  getSemanticTokens(doc: DocumentContext): SemanticTokenData[] {
+    const tokens: SemanticTokenData[] = [];
+    const declaredStats = this.getDeclaredStats();
+
+    // Highlight declared stat names with variable color (token type 3)
+    const stats = this.statsByFile.get(doc.uri);
+    if (stats) {
+      for (const st of stats) {
+        if (declaredStats.has(st.statName)) {
+          tokens.push({
+            line: st.nameRange.startPosition.row,
+            char: st.nameRange.startPosition.column,
+            length: st.nameRange.endPosition.column - st.nameRange.startPosition.column,
+            tokenType: 3, // statName — mapped to variable color in sendDecorations
+            tokenModifiers: 0,
+          });
+        }
+      }
+    }
+
+    return tokens;
+  }
 
   getReferences(doc: DocumentContext, position: Position): Location[] {
     // Htable references

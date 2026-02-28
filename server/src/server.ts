@@ -94,6 +94,7 @@ function sendDecorations(uri: string): void {
     },
     kind: t.tokenType === 0 ? 'pvType' as const
         : t.tokenType === 2 ? 'pvBuiltin' as const
+        : t.tokenType === 3 ? 'statName' as const
         : 'pvName' as const,
   }));
 

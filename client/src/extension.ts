@@ -25,11 +25,15 @@ const pvBuiltinDecoration = vscode.window.createTextEditorDecorationType({
   color: new vscode.ThemeColor('kamailio.pvBuiltinColor'),
 });
 
+const statNameDecoration = vscode.window.createTextEditorDecorationType({
+  color: new vscode.ThemeColor('kamailio.pvNameColor'),
+});
+
 interface PvDecorationData {
   uri: string;
   decorations: Array<{
     range: { start: { line: number; character: number }; end: { line: number; character: number } };
-    kind: 'pvType' | 'pvName' | 'pvBuiltin';
+    kind: 'pvType' | 'pvName' | 'pvBuiltin' | 'statName';
   }>;
 }
 
@@ -84,6 +88,7 @@ export function activate(context: vscode.ExtensionContext) {
     pvTypeDecoration,
     pvNameDecoration,
     pvBuiltinDecoration,
+    statNameDecoration,
   );
 }
 
@@ -96,6 +101,7 @@ function applyDecorations(data: PvDecorationData): void {
   const typeRanges: vscode.Range[] = [];
   const nameRanges: vscode.Range[] = [];
   const builtinRanges: vscode.Range[] = [];
+  const statRanges: vscode.Range[] = [];
 
   for (const dec of data.decorations) {
     const range = new vscode.Range(
@@ -106,12 +112,14 @@ function applyDecorations(data: PvDecorationData): void {
       case 'pvType': typeRanges.push(range); break;
       case 'pvName': nameRanges.push(range); break;
       case 'pvBuiltin': builtinRanges.push(range); break;
+      case 'statName': statRanges.push(range); break;
     }
   }
 
   editor.setDecorations(pvTypeDecoration, typeRanges);
   editor.setDecorations(pvNameDecoration, nameRanges);
   editor.setDecorations(pvBuiltinDecoration, builtinRanges);
+  editor.setDecorations(statNameDecoration, statRanges);
 }
 
 export function deactivate(): Thenable<void> | undefined {
