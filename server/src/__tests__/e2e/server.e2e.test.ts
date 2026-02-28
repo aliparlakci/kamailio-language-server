@@ -86,6 +86,25 @@ describe('E2E: Completions', () => {
     expect(editText).not.toContain('$$');
   });
 
+  it('textEdit range covers typed prefix when completing $va -> $var(', async () => {
+    const uri = 'file:///test/comp_replace.py';
+    // User has typed "$va" inside the string
+    await client.openDocument(uri, 'KSR.pv.get("$va")');
+    // Cursor is after 'a', before closing quote. "$va" starts at col 12
+    // string_content "$va" is at cols 12-15, cursor at col 15
+    const items = await client.getCompletions(uri, 0, 15);
+    expect(items.length).toBeGreaterThan(0);
+
+    const varItem = items.find(c => c.label === '$var(');
+    expect(varItem).toBeDefined();
+
+    // The textEdit must REPLACE "$va" (cols 12-15), not insert at cursor
+    const edit = varItem!.textEdit as any;
+    expect(edit).toBeDefined();
+    expect(edit.range.start.character).toBe(12); // starts at $
+    expect(edit.range.end.character).toBe(15);   // ends at cursor (after 'a')
+  });
+
   it('returns no completions outside KSR.pv strings', async () => {
     const uri = 'file:///test/comp_outside.py';
     await client.openDocument(uri, 'print("hello")');

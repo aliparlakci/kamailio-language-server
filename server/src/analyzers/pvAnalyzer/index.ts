@@ -309,12 +309,15 @@ export class PvAnalyzer implements Analyzer {
 
   private isInsideKsrPvString(node: SyntaxNode): boolean {
     // Walk up to find if we're inside a string that's an argument to KSR.pv.*
+    // The cursor may land on string_content, string_start, string_end, or string
     let current: SyntaxNode | null = node;
     let stringNode: SyntaxNode | null = null;
 
     while (current) {
-      if (current.type === 'string' || current.type === 'string_content') {
-        stringNode = current.type === 'string' ? current : current.parent;
+      if (current.type === 'string') {
+        stringNode = current;
+      } else if (current.type === 'string_content' || current.type === 'string_start' || current.type === 'string_end') {
+        stringNode = current.parent;
       }
       if (current.type === 'call' && stringNode) {
         const funcNode = current.childForFieldName('function');
@@ -357,14 +360,41 @@ export class PvAnalyzer implements Analyzer {
   }
 
   private getPvCompletions(doc: DocumentContext, position: Position, node: SyntaxNode): CompletionItem[] {
-    // Find the string_content node to get the text typed so far
-    const contentNode = node.type === 'string_content' ? node
-      : node.type === 'string' ? node.namedChildren.find((c) => c.type === 'string_content')
-      : null;
+    // Find the string_content node. The cursor might land on string_content,
+    // string, string_start, string_end, or even ERROR nodes.
+    let contentNode: SyntaxNode | null = null;
+    let stringNode: SyntaxNode | null = null;
+
+    // Walk up to find the string node
+    let current: SyntaxNode | null = node;
+    while (current) {
+      if (current.type === 'string_content') {
+        contentNode = current;
+        stringNode = current.parent;
+        break;
+      }
+      if (current.type === 'string') {
+        stringNode = current;
+        contentNode = current.namedChildren.find((c) => c.type === 'string_content') || null;
+        break;
+      }
+      current = current.parent;
+    }
 
     if (!contentNode) {
-      // Empty string — cursor is right after the opening quote
-      // Offer all PV completions, inserting from scratch
+      // Empty string or cursor is on the quote — find the string node
+      // and compute insert position right after the opening quote
+      if (stringNode) {
+        const openQuote = stringNode.children.find((c) => c.type === 'string_start');
+        if (openQuote) {
+          const insertPos: Position = {
+            line: openQuote.endPosition.row,
+            character: openQuote.endPosition.column,
+          };
+          const emptyRange: Range = { start: insertPos, end: insertPos };
+          return this.getAllPvCompletionItems(emptyRange);
+        }
+      }
       const emptyRange: Range = { start: position, end: position };
       return this.getAllPvCompletionItems(emptyRange);
     }
