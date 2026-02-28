@@ -93,6 +93,7 @@
     "watch:client": "tsc -w -p client/tsconfig.json",
     "watch:server": "tsc -w -p server/tsconfig.json",
     "test": "cd server && npm test",
+    "verify-package": "bash scripts/verify-package.sh",
     "postinstall": "cd client && npm install && cd ../server && npm install",
     "copy-wasm": "cp node_modules/tree-sitter-python/tree-sitter-python.wasm server/wasm/ 2>/dev/null || cp server/node_modules/tree-sitter-python/tree-sitter-python.wasm server/wasm/ 2>/dev/null || echo 'WASM not found'"
   },
