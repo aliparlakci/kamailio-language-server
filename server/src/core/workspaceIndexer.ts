@@ -3,8 +3,11 @@ import * as path from 'path';
 import { Connection, FileChangeType } from 'vscode-languageserver';
 import { DocumentManager } from './documentManager';
 
+const STAT_MODPARAM_RE = /modparam\s*\(\s*"statistics"\s*,\s*"variable"\s*,\s*"([^"]+)"\s*\)/g;
+
 export class WorkspaceIndexer {
   private knownFiles: Set<string> = new Set();
+  private declaredStats: Set<string> = new Set();
 
   constructor(
     private connection: Connection,
@@ -43,6 +46,16 @@ export class WorkspaceIndexer {
       if (i + batchSize < pyFiles.length) {
         await new Promise((resolve) => setTimeout(resolve, 0));
       }
+    }
+
+    // Scan for kamailio.cfg files and extract statistic declarations
+    for (const root of this.workspaceRoots) {
+      this.collectCfgStats(root);
+    }
+    if (this.declaredStats.size > 0) {
+      this.connection.console.log(
+        `[workspace-indexer] Found ${this.declaredStats.size} declared statistics`
+      );
     }
 
     this.connection.console.log(
@@ -96,6 +109,36 @@ export class WorkspaceIndexer {
 
   getWorkspaceRoots(): string[] {
     return this.workspaceRoots;
+  }
+
+  getDeclaredStats(): Set<string> {
+    return this.declaredStats;
+  }
+
+  private collectCfgStats(dir: string): void {
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name === 'node_modules' || entry.name === '.git') continue;
+          this.collectCfgStats(fullPath);
+        } else if (entry.name.endsWith('.cfg')) {
+          try {
+            const content = fs.readFileSync(fullPath, 'utf-8');
+            let match: RegExpExecArray | null;
+            STAT_MODPARAM_RE.lastIndex = 0;
+            while ((match = STAT_MODPARAM_RE.exec(content)) !== null) {
+              this.declaredStats.add(match[1]);
+            }
+          } catch {
+            // Can't read file
+          }
+        }
+      }
+    } catch {
+      // Permission errors
+    }
   }
 
   private collectPyFiles(dir: string, results: string[]): void {

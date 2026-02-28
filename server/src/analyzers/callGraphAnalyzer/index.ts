@@ -31,6 +31,7 @@ const HTABLE_WRITE_METHODS = new Set(['sht_sets', 'sht_seti', 'sht_inc']);
 const HDR_METHODS = new Set([
   'get', 'gete', 'gete_idx', 'is_present', 'remove',
 ]);
+const STAT_METHODS = new Set(['update_stat']);
 
 interface CallbackReference {
   name: string;
@@ -50,6 +51,11 @@ interface HdrReference {
   nameRange: TreeSitterRange;
 }
 
+interface StatReference {
+  statName: string;
+  nameRange: TreeSitterRange;
+}
+
 export class CallGraphAnalyzer implements Analyzer {
   readonly id = 'callGraph';
   readonly name = 'Call Graph Analyzer';
@@ -61,11 +67,13 @@ export class CallGraphAnalyzer implements Analyzer {
   private callbacksByFile: Map<string, CallbackReference[]> = new Map();
   private htablesByFile: Map<string, HtableReference[]> = new Map();
   private hdrsByFile: Map<string, HdrReference[]> = new Map();
+  private statsByFile: Map<string, StatReference[]> = new Map();
   private constantsByFile: Map<string, StringConstants> = new Map();
 
   constructor(
     private getWorkspaceRoots: () => string[],
-    private getKnownFiles: () => Set<string>
+    private getKnownFiles: () => Set<string>,
+    private getDeclaredStats: () => Set<string> = () => new Set()
   ) {}
 
   analyze(context: AnalysisContext): void {
@@ -124,6 +132,10 @@ export class CallGraphAnalyzer implements Analyzer {
     // Extract header references (KSR.hdr.*)
     const hdrs = extractHdrReferences(tree, allConstants);
     this.hdrsByFile.set(uri, hdrs);
+
+    // Extract statistic references (KSR.statistics.update_stat)
+    const stats = extractStatReferences(tree, allConstants);
+    this.statsByFile.set(uri, stats);
   }
 
   private resolveCallee(callee: string, fromUri: string): string | null {
@@ -182,6 +194,20 @@ export class CallGraphAnalyzer implements Analyzer {
       return refs;
     }
 
+    // Stat references
+    const stat = this.findStatAtPosition(doc, position);
+    if (stat) {
+      const refs: Location[] = [];
+      for (const [uri, statRefs] of this.statsByFile) {
+        for (const ref of statRefs) {
+          if (ref.statName === stat.statName) {
+            refs.push({ uri, range: toRange(ref.nameRange) });
+          }
+        }
+      }
+      return refs;
+    }
+
     return [];
   }
 
@@ -221,6 +247,27 @@ export class CallGraphAnalyzer implements Analyzer {
       return {
         contents: { kind: MarkupKind.Markdown, value: lines.join('\n') },
         range: toRange(hdr.nameRange),
+      };
+    }
+
+    // Stat hover
+    const stat = this.findStatAtPosition(doc, position);
+    if (stat) {
+      const declared = this.getDeclaredStats().has(stat.statName);
+      let count = 0;
+      for (const refs of this.statsByFile.values()) {
+        count += refs.filter(r => r.statName === stat.statName).length;
+      }
+      const lines = [
+        `**statistic: ${stat.statName}**`,
+        '',
+        declared ? 'Declared in kamailio.cfg' : 'Not declared in kamailio.cfg',
+        '',
+        `${count} reference${count !== 1 ? 's' : ''} in workspace`,
+      ];
+      return {
+        contents: { kind: MarkupKind.Markdown, value: lines.join('\n') },
+        range: toRange(stat.nameRange),
       };
     }
 
@@ -267,6 +314,23 @@ export class CallGraphAnalyzer implements Analyzer {
             message: `Hash table '${ht.tableName}' is read but never written to in the workspace`,
             source: 'kamailio-htable',
             code: 'htable-never-set',
+          });
+        }
+      }
+    }
+
+    // Statistics validation: flag undeclared stat names
+    const stats = this.statsByFile.get(doc.uri);
+    const declaredStats = this.getDeclaredStats();
+    if (stats && declaredStats.size > 0) {
+      for (const st of stats) {
+        if (!declaredStats.has(st.statName)) {
+          diags.push({
+            severity: DiagnosticSeverity.Warning,
+            range: toRange(st.nameRange),
+            message: `Statistic '${st.statName}' is not declared in kamailio.cfg`,
+            source: 'kamailio-stat',
+            code: 'undeclared-stat',
           });
         }
       }
@@ -321,6 +385,10 @@ export class CallGraphAnalyzer implements Analyzer {
       return this.getHdrCompletions(node, position);
     }
 
+    if (this.isInsideStatString(node)) {
+      return this.getStatCompletions(node, position);
+    }
+
     return [];
   }
 
@@ -331,6 +399,7 @@ export class CallGraphAnalyzer implements Analyzer {
     this.callbacksByFile.delete(uri);
     this.htablesByFile.delete(uri);
     this.hdrsByFile.delete(uri);
+    this.statsByFile.delete(uri);
     this.constantsByFile.delete(uri);
   }
 
@@ -565,6 +634,77 @@ export class CallGraphAnalyzer implements Analyzer {
     const offset = positionToOffset(doc.fullText, position);
     return hdrs.find(
       (h) => offset >= h.nameRange.startIndex && offset < h.nameRange.endIndex
+    );
+  }
+
+  private getStatCompletions(node: SyntaxNode, position: Position): CompletionItem[] {
+    const replaceRange = this.getStringContentRange(node, position);
+    const items: CompletionItem[] = [];
+    const seen = new Set<string>();
+
+    // Declared stats from kamailio.cfg
+    for (const name of this.getDeclaredStats()) {
+      seen.add(name);
+      items.push({
+        label: name,
+        kind: CompletionItemKind.EnumMember,
+        detail: 'Declared in kamailio.cfg',
+        sortText: `0${name}`,
+        textEdit: TextEdit.replace(replaceRange, name),
+      });
+    }
+
+    // Stats seen in workspace but not in cfg
+    for (const refs of this.statsByFile.values()) {
+      for (const ref of refs) {
+        if (seen.has(ref.statName)) continue;
+        seen.add(ref.statName);
+        items.push({
+          label: ref.statName,
+          kind: CompletionItemKind.Value,
+          sortText: `0${ref.statName}`,
+          textEdit: TextEdit.replace(replaceRange, ref.statName),
+        });
+      }
+    }
+
+    return items;
+  }
+
+  private isInsideStatString(node: SyntaxNode): boolean {
+    let current: SyntaxNode | null = node;
+    let stringNode: SyntaxNode | null = null;
+
+    while (current) {
+      if (current.type === 'string') {
+        stringNode = current;
+      } else if (current.type === 'string_content' || current.type === 'string_start' || current.type === 'string_end') {
+        stringNode = current.parent;
+      }
+      if (current.type === 'call' && stringNode) {
+        const argsNode = current.childForFieldName('arguments');
+        if (argsNode) {
+          const firstArg = argsNode.namedChild(0);
+          if (firstArg && firstArg.startIndex === stringNode.startIndex) {
+            const funcNode = current.childForFieldName('function');
+            if (funcNode && isKsrStatMethod(funcNode)) {
+              return true;
+            }
+          }
+        }
+      }
+      current = current.parent;
+    }
+    return false;
+  }
+
+  private findStatAtPosition(doc: DocumentContext, position: Position): StatReference | undefined {
+    const stats = this.statsByFile.get(doc.uri);
+    if (!stats) return undefined;
+
+    const offset = positionToOffset(doc.fullText, position);
+    return stats.find(
+      (s) => offset >= s.nameRange.startIndex && offset < s.nameRange.endIndex
     );
   }
 }
@@ -829,6 +969,57 @@ function tryExtractHdrCall(callNode: SyntaxNode, constants: StringConstants): Hd
   return {
     headerName: resolved.value,
     method: methodId.text,
+    nameRange: resolved.range,
+  };
+}
+
+function isKsrStatMethod(funcNode: SyntaxNode): boolean {
+  if (funcNode.type !== 'attribute') return false;
+  const methodId = funcNode.childForFieldName('attribute');
+  if (!methodId || !STAT_METHODS.has(methodId.text)) return false;
+
+  const obj = funcNode.childForFieldName('object');
+  if (!obj || obj.type !== 'attribute') return false;
+  const statId = obj.childForFieldName('attribute');
+  const ksrId = obj.childForFieldName('object');
+  return (
+    !!ksrId && ksrId.type === 'identifier' && ksrId.text === 'KSR' &&
+    !!statId && statId.type === 'identifier' && statId.text === 'statistics'
+  );
+}
+
+function extractStatReferences(tree: Tree, constants: StringConstants): StatReference[] {
+  const refs: StatReference[] = [];
+  walkForStatCalls(tree.rootNode, refs, constants);
+  return refs;
+}
+
+function walkForStatCalls(node: SyntaxNode, refs: StatReference[], constants: StringConstants): void {
+  if (node.type === 'call') {
+    const ref = tryExtractStatCall(node, constants);
+    if (ref) {
+      refs.push(ref);
+      return;
+    }
+  }
+  for (let i = 0; i < node.childCount; i++) {
+    const child = node.child(i);
+    if (child) walkForStatCalls(child, refs, constants);
+  }
+}
+
+function tryExtractStatCall(callNode: SyntaxNode, constants: StringConstants): StatReference | null {
+  const funcNode = callNode.childForFieldName('function');
+  if (!funcNode || !isKsrStatMethod(funcNode)) return null;
+
+  const argsNode = callNode.childForFieldName('arguments');
+  if (!argsNode) return null;
+
+  const resolved = resolveFirstStringArg(argsNode, constants);
+  if (!resolved) return null;
+
+  return {
+    statName: resolved.value,
     nameRange: resolved.range,
   };
 }

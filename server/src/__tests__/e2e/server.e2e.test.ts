@@ -858,3 +858,78 @@ describe('E2E: Extra Python paths', () => {
     expect(diags.filter(d => d.code === 'undefined-pv')).toHaveLength(0);
   });
 });
+
+describe('E2E: Statistics validation from kamailio.cfg', () => {
+  let statClient: TestLspClient;
+  let tmpDir: string;
+
+  beforeAll(async () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kemi-stat-test-'));
+
+    // kamailio.cfg with statistic declarations
+    fs.writeFileSync(path.join(tmpDir, 'kamailio.cfg'), [
+      'modparam("statistics", "variable", "invite")',
+      'modparam("statistics", "variable", "cancel")',
+      'modparam("statistics", "variable", "redirect")',
+    ].join('\n'));
+
+    statClient = await TestLspClient.start([
+      { uri: 'file://' + tmpDir, name: 'test-stat' },
+    ]);
+    await new Promise(r => setTimeout(r, 500));
+  }, 15000);
+
+  afterAll(async () => {
+    await statClient.shutdown();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('suggests declared stat names inside update_stat', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_comp.py');
+    await statClient.openDocument(uri, 'KSR.statistics.update_stat("")');
+    // char 28 is between the quotes
+    const items = await statClient.getCompletions(uri, 0, 28);
+    expect(items.some(c => c.label === 'invite')).toBe(true);
+    expect(items.some(c => c.label === 'cancel')).toBe(true);
+    expect(items.some(c => c.label === 'redirect')).toBe(true);
+  });
+
+  it('warns when stat name is not declared in kamailio.cfg', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_unknown.py');
+    await statClient.openDocument(uri, 'KSR.statistics.update_stat("nonexistent_stat", 1)');
+    const diags = await statClient.waitForDiagnostics(uri);
+    expect(diags.some(d =>
+      d.message.includes('nonexistent_stat') && d.code === 'undeclared-stat'
+    )).toBe(true);
+  });
+
+  it('does not warn when stat name is declared in kamailio.cfg', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_ok.py');
+    await statClient.openDocument(uri, 'KSR.statistics.update_stat("invite", 1)');
+    await new Promise(r => setTimeout(r, 500));
+    const diags = statClient.getDiagnostics(uri);
+    expect(diags.filter(d => d.code === 'undeclared-stat')).toHaveLength(0);
+  });
+
+  it('resolves constants used as stat names', async () => {
+    const uri = 'file://' + path.join(tmpDir, 'stat_const.py');
+    const code = [
+      'STAT_INVITE = "invite"',
+      'KSR.statistics.update_stat(STAT_INVITE, 1)',
+    ].join('\n');
+    await statClient.openDocument(uri, code);
+    await new Promise(r => setTimeout(r, 500));
+    const diags = statClient.getDiagnostics(uri);
+    expect(diags.filter(d => d.code === 'undeclared-stat')).toHaveLength(0);
+  });
+
+  it('finds all references for a stat name', async () => {
+    const uri1 = 'file://' + path.join(tmpDir, 'stat_ref_a.py');
+    const uri2 = 'file://' + path.join(tmpDir, 'stat_ref_b.py');
+    await statClient.openDocument(uri1, 'KSR.statistics.update_stat("cancel", 1)');
+    await statClient.openDocument(uri2, 'KSR.statistics.update_stat("cancel", 1)');
+    // char 30 is inside "cancel" on uri1
+    const refs = await statClient.getReferences(uri1, 0, 30);
+    expect(refs.length).toBe(2);
+  });
+});

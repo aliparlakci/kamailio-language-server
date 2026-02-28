@@ -93,7 +93,8 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
 
   const callGraphAnalyzer = new CallGraphAnalyzer(
     () => workspaceIndexer.getWorkspaceRoots(),
-    () => workspaceIndexer.getKnownFiles()
+    () => workspaceIndexer.getKnownFiles(),
+    () => workspaceIndexer.getDeclaredStats()
   );
   const pvAnalyzer = new PvAnalyzer();
   pvAnalyzer.setCallGraphAnalyzer(callGraphAnalyzer);
