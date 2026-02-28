@@ -26,9 +26,6 @@ jobs:
       - name: Copy WASM
         run: npm run copy-wasm
 
-      - name: Copy WASM
-        run: npm run copy-wasm
-
       - name: Compile
         run: npm run compile
 
@@ -59,8 +56,8 @@ jobs:
       - name: Copy WASM
         run: npm run copy-wasm
 
-      - name: Compile
-        run: npm run compile
+      - name: Bundle with esbuild
+        run: npm run bundle
 
       - name: Bump version based on commit count
         run: |
@@ -74,9 +71,6 @@ jobs:
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "Publishing version ${VERSION}"
 
-      - name: Prune to production dependencies for packaging
-        run: npm prune --production
-
       - name: Package extension
         run: npx @vscode/vsce package --pre-release --no-dependencies
 
@@ -86,5 +80,5 @@ jobs:
       - name: Upload VSIX as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: kamailio-kemi-lsp-${{ env.VERSION }}.vsix
+          name: kamailio-lsp-${{ env.VERSION }}.vsix
           path: "*.vsix"

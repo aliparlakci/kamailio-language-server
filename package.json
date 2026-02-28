@@ -69,9 +69,15 @@
       "editor.semanticTokenColorCustomizations": {
         "enabled": true,
         "rules": {
-          "kamailioPvType": { "foreground": "#4ec9b0" },
-          "kamailioPvName": { "foreground": "#9cdcfe" },
-          "kamailioPvBuiltin": { "foreground": "#9cdcfe" }
+          "kamailioPvType": {
+            "foreground": "#4ec9b0"
+          },
+          "kamailioPvName": {
+            "foreground": "#9cdcfe"
+          },
+          "kamailioPvBuiltin": {
+            "foreground": "#9cdcfe"
+          }
         }
       }
     }
@@ -80,6 +86,9 @@
     "compile": "npm run compile:client && npm run compile:server",
     "compile:client": "tsc -p client/tsconfig.json",
     "compile:server": "tsc -p server/tsconfig.json",
+    "bundle": "npm run bundle:client && npm run bundle:server",
+    "bundle:client": "esbuild client/src/extension.ts --bundle --outfile=client/out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "bundle:server": "esbuild server/src/server.ts --bundle --outfile=server/out/server.js --external:vscode --format=cjs --platform=node --sourcemap",
     "watch": "concurrently \"npm run watch:client\" \"npm run watch:server\"",
     "watch:client": "tsc -w -p client/tsconfig.json",
     "watch:server": "tsc -w -p server/tsconfig.json",
@@ -90,13 +99,14 @@
   "devDependencies": {
     "@vscode/vsce": "^3.0.0",
     "concurrently": "^8.0.0",
+    "esbuild": "^0.27.3",
     "typescript": "^5.3.0"
   },
   "dependencies": {
+    "tree-sitter-python": "^0.23.6",
     "vscode-languageclient": "^9.0.1",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.11",
-    "web-tree-sitter": "^0.24.3",
-    "tree-sitter-python": "^0.23.6"
+    "web-tree-sitter": "^0.24.3"
   }
 }
