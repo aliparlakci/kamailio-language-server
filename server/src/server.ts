@@ -40,6 +40,34 @@ function scheduleDiagnostics(uri: string, delayMs = 300): void {
   );
 }
 
+// Send PV decoration data to client for client-side highlighting.
+// This bypasses semantic tokens which get overridden by Pylance.
+function sendDecorations(uri: string): void {
+  const state = documentManager.getDocumentState(uri);
+  if (!state) return;
+
+  const tokens = registry.getSemanticTokens({
+    uri: state.uri,
+    tree: state.tree,
+    fullText: state.content,
+  });
+
+  const decorations = tokens.map((t) => ({
+    range: {
+      start: { line: t.line, character: t.char },
+      end: { line: t.line, character: t.char + t.length },
+    },
+    kind: t.tokenType === 0 ? 'pvType' as const
+        : t.tokenType === 2 ? 'pvBuiltin' as const
+        : 'pvName' as const,
+  }));
+
+  connection.sendNotification('kamailio/pvDecorations', {
+    uri: state.uri,
+    decorations,
+  });
+}
+
 connection.onInitialize(async (_params: InitializeParams): Promise<InitializeResult> => {
   const parser = await initTreeSitter();
   registry = new AnalyzerRegistry();
@@ -73,14 +101,14 @@ connection.onDidOpenTextDocument((params) => {
     params.textDocument.text,
     params.textDocument.version
   );
-  // Publish diagnostics immediately on file open
   scheduleDiagnostics(params.textDocument.uri, 0);
+  sendDecorations(params.textDocument.uri);
 });
 
 connection.onDidChangeTextDocument((params) => {
   documentManager.changeDocument(params);
-  // Debounce diagnostics while the user is typing
   scheduleDiagnostics(params.textDocument.uri);
+  sendDecorations(params.textDocument.uri);
 });
 
 connection.onDidCloseTextDocument((params) => {

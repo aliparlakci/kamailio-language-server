@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { ExtensionContext, workspace } from 'vscode';
+import * as vscode from 'vscode';
 import {
   LanguageClient,
   LanguageClientOptions,
@@ -9,7 +9,31 @@ import {
 
 let client: LanguageClient;
 
-export function activate(context: ExtensionContext) {
+// Decoration types for PV highlighting — these render on top of
+// Pylance's string tokens and can't be overridden.
+const pvTypeDecoration = vscode.window.createTextEditorDecorationType({
+  color: '#c586c0',
+  fontWeight: 'bold',
+});
+
+const pvNameDecoration = vscode.window.createTextEditorDecorationType({
+  color: '#9cdcfe',
+});
+
+const pvBuiltinDecoration = vscode.window.createTextEditorDecorationType({
+  color: '#4ec9b0',
+  fontWeight: 'bold',
+});
+
+interface PvDecorationData {
+  uri: string;
+  decorations: Array<{
+    range: { start: { line: number; character: number }; end: { line: number; character: number } };
+    kind: 'pvType' | 'pvName' | 'pvBuiltin';
+  }>;
+}
+
+export function activate(context: vscode.ExtensionContext) {
   const serverModule = context.asAbsolutePath(
     path.join('server', 'out', 'server.js')
   );
@@ -26,7 +50,7 @@ export function activate(context: ExtensionContext) {
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: 'file', language: 'python' }],
     synchronize: {
-      fileEvents: workspace.createFileSystemWatcher('**/*.py'),
+      fileEvents: vscode.workspace.createFileSystemWatcher('**/*.py'),
     },
   };
 
@@ -37,7 +61,45 @@ export function activate(context: ExtensionContext) {
     clientOptions
   );
 
-  client.start();
+  client.start().then(() => {
+    // Listen for PV decoration notifications from the server
+    client.onNotification('kamailio/pvDecorations', (data: PvDecorationData) => {
+      applyDecorations(data);
+    });
+  });
+
+  context.subscriptions.push(
+    pvTypeDecoration,
+    pvNameDecoration,
+    pvBuiltinDecoration,
+  );
+}
+
+function applyDecorations(data: PvDecorationData): void {
+  const editor = vscode.window.visibleTextEditors.find(
+    (e) => e.document.uri.toString() === data.uri
+  );
+  if (!editor) return;
+
+  const typeRanges: vscode.Range[] = [];
+  const nameRanges: vscode.Range[] = [];
+  const builtinRanges: vscode.Range[] = [];
+
+  for (const dec of data.decorations) {
+    const range = new vscode.Range(
+      new vscode.Position(dec.range.start.line, dec.range.start.character),
+      new vscode.Position(dec.range.end.line, dec.range.end.character)
+    );
+    switch (dec.kind) {
+      case 'pvType': typeRanges.push(range); break;
+      case 'pvName': nameRanges.push(range); break;
+      case 'pvBuiltin': builtinRanges.push(range); break;
+    }
+  }
+
+  editor.setDecorations(pvTypeDecoration, typeRanges);
+  editor.setDecorations(pvNameDecoration, nameRanges);
+  editor.setDecorations(pvBuiltinDecoration, builtinRanges);
 }
 
 export function deactivate(): Thenable<void> | undefined {
