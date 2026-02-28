@@ -11,6 +11,7 @@ import { DocumentManager } from './core/documentManager';
 import { initTreeSitter } from './core/treeSitterInit';
 import { WorkspaceIndexer } from './core/workspaceIndexer';
 import { PvAnalyzer } from './analyzers/pvAnalyzer/index';
+import { CallGraphAnalyzer } from './analyzers/callGraphAnalyzer/index';
 
 const connection = createConnection(ProposedFeatures.all);
 
@@ -79,7 +80,17 @@ connection.onInitialize(async (params: InitializeParams): Promise<InitializeResu
     .map((f) => f.uri.replace('file://', ''));
   workspaceIndexer = new WorkspaceIndexer(connection, documentManager, workspaceRoots);
 
-  registry.register(new PvAnalyzer());
+  const callGraphAnalyzer = new CallGraphAnalyzer(
+    () => workspaceIndexer.getWorkspaceRoots(),
+    () => workspaceIndexer.getKnownFiles()
+  );
+  const pvAnalyzer = new PvAnalyzer();
+  pvAnalyzer.setCallGraphAnalyzer(callGraphAnalyzer);
+
+  // Register CallGraphAnalyzer BEFORE PvAnalyzer so call graph is
+  // updated first when a document changes
+  registry.register(callGraphAnalyzer);
+  registry.register(pvAnalyzer);
 
   return {
     capabilities: {

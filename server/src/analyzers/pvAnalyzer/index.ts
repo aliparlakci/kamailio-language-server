@@ -23,6 +23,7 @@ import { parsePvString, pvIdentityKey } from './pvParser';
 import { VariableIndex, PvOccurrence } from './variableIndex';
 import { BUILTIN_PVS, BUILTIN_BARE_PVS, BUILTIN_PV_CLASSES } from '../../data/builtinPvs';
 import { SyntaxNode } from 'web-tree-sitter';
+import type { CallGraphAnalyzer } from '../callGraphAnalyzer/index';
 
 // Semantic token type indices (must match legend order in server.ts)
 const TOKEN_TYPE_PV_TYPE = 0;     // 'kamailioPvType' — $var(, $avp(, $shv(
@@ -37,6 +38,11 @@ export class PvAnalyzer implements Analyzer {
   readonly name = 'KSR.pv Pseudo-Variable Analyzer';
 
   private indices: Map<string, VariableIndex> = new Map();
+  private callGraphAnalyzer: CallGraphAnalyzer | null = null;
+
+  setCallGraphAnalyzer(cga: CallGraphAnalyzer): void {
+    this.callGraphAnalyzer = cga;
+  }
 
   analyze(context: AnalysisContext): void {
     // Always rebuild index from the full tree. Tree-sitter parsing is
@@ -189,6 +195,12 @@ export class PvAnalyzer implements Analyzer {
               foundWriteElsewhere = true;
               break;
             }
+          }
+
+          // Also check transitive writes via the call graph
+          if (!foundWriteElsewhere && this.callGraphAnalyzer) {
+            const cg = this.callGraphAnalyzer.getCallGraph();
+            foundWriteElsewhere = cg.hasTransitiveWrite(key);
           }
 
           if (!foundWriteElsewhere) {
