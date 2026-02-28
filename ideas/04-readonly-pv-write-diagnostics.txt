@@ -1,0 +1,24 @@
+Diagnostics for Writing to Read-Only PVs
+=========================================
+
+Some PVs like $rU, $ru, $rm, $ci are read-only in Kamailio. If a user
+calls KSR.pv.sets("$rU", ...) the extension should warn them.
+
+The builtinPvs.ts data already has an isReadOnly field. The analyzer
+just needs to check it on write operations.
+
+Examples that should warn:
+  KSR.pv.sets("$ci", "something")   -> $ci (Call-ID) is read-only
+  KSR.pv.seti("$rm", 1)             -> $rm (Request Method) is read-only
+  KSR.pv.sets("$rU", "newuser")     -> $rU is read-only
+
+Examples that are fine:
+  KSR.pv.sets("$rd", "10.0.0.1")    -> $rd (destination domain) is writable
+  KSR.pv.sets("$var(x)", "val")     -> user variables are always writable
+  KSR.pv.sets("$td", "outbound")    -> $td is writable
+
+Evidence from usage:
+  KSR.pv.sets("$rd", ...) appears multiple times (correct - rd is writable)
+  KSR.pv.sets("$td", ...) appears (correct - td is writable)
+  No writes to $rU/$ci/$rm found (team already knows the rules, but
+  the extension should catch mistakes)

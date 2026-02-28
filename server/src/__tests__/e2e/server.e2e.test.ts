@@ -145,6 +145,16 @@ describe('E2E: Hover', () => {
     expect(content).toContain('Request URI');
   });
 
+  it('returns hover info for PV inside f-string KSR.pv call', async () => {
+    const uri = 'file:///test/hover_fstring.py';
+    // x = f"{KSR.pv.get('$fU')}"  — char 20 is second char of $fU
+    await client.openDocument(uri, 'x = f"{KSR.pv.get(\'$fU\')}"');
+    const hover = await client.getHover(uri, 0, 20);
+    expect(hover).not.toBeNull();
+    const content = (hover!.contents as any).value;
+    expect(content).toContain('$fU');
+  });
+
   it('returns null outside PV strings', async () => {
     const uri = 'file:///test/hover_outside.py';
     await client.openDocument(uri, 'print("hello")');
@@ -174,6 +184,30 @@ describe('E2E: Find References', () => {
     const uri2 = 'file:///test/ref_b.py';
     await client.openDocument(uri1, 'KSR.pv.sets("$var(shared)", "val")');
     await client.openDocument(uri2, 'x = KSR.pv.get("$var(shared)")');
+    const refs = await client.getReferences(uri2, 0, 20);
+    expect(refs.length).toBe(2);
+    const uris = refs.map(r => r.uri).sort();
+    expect(uris).toEqual([uri1, uri2]);
+  });
+
+  it('finds all references for bare PVs across documents', async () => {
+    const uri1 = 'file:///test/ref_bare_a.py';
+    const uri2 = 'file:///test/ref_bare_b.py';
+    await client.openDocument(uri1, 'val = KSR.pv.get("$rU")');
+    await client.openDocument(uri2, 'user = KSR.pv.get("$rU")');
+    const refs = await client.getReferences(uri2, 0, 20);
+    expect(refs.length).toBe(2);
+    const uris = refs.map(r => r.uri).sort();
+    expect(uris).toEqual([uri1, uri2]);
+  });
+
+  it('finds references for PV inside f-string KSR.pv call', async () => {
+    const uri1 = 'file:///test/ref_fstr_a.py';
+    const uri2 = 'file:///test/ref_fstr_b.py';
+    // Use $tU to avoid collision with other tests using $ru/$rU
+    await client.openDocument(uri1, 'KSR.pv.get("$tU")');
+    // x = f"{KSR.pv.get('$tU')}"  — char 20 is second char of $tU
+    await client.openDocument(uri2, 'x = f"{KSR.pv.get(\'$tU\')}"');
     const refs = await client.getReferences(uri2, 0, 20);
     expect(refs.length).toBe(2);
     const uris = refs.map(r => r.uri).sort();
@@ -448,5 +482,134 @@ describe('E2E: Workspace indexing (files on disk, not opened in editor)', () => 
 
     const diags = await wsClient.waitForDiagnostics(uri);
     expect(diags.some(d => d.code === 'undefined-pv')).toBe(true);
+  });
+});
+
+describe('E2E: Callback function validation', () => {
+  it('warns when callback function does not exist', async () => {
+    const uri = 'file:///test/cb_missing.py';
+    await client.openDocument(uri, 'KSR.tm.t_on_failure("nonexistent_func")');
+    const diags = await client.waitForDiagnostics(uri);
+    expect(diags.some(d =>
+      d.message.includes('nonexistent_func') && d.code === 'undefined-callback'
+    )).toBe(true);
+  });
+
+  it('does not warn when callback function exists in same file', async () => {
+    const uri = 'file:///test/cb_exists.py';
+    const code = [
+      'def ksr_failure_manage():',
+      '    pass',
+      '',
+      'KSR.tm.t_on_failure("ksr_failure_manage")',
+    ].join('\n');
+    await client.openDocument(uri, code);
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(uri);
+    expect(diags.filter(d => d.code === 'undefined-callback')).toHaveLength(0);
+  });
+
+  it('does not warn when callback function exists in another file', async () => {
+    const defUri = 'file:///test/cb_cross_def.py';
+    const useUri = 'file:///test/cb_cross_use.py';
+    await client.openDocument(defUri, [
+      'def ksr_branch_handler():',
+      '    pass',
+    ].join('\n'));
+    await client.openDocument(useUri, 'KSR.tm.t_on_branch("ksr_branch_handler")');
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(useUri);
+    expect(diags.filter(d => d.code === 'undefined-callback')).toHaveLength(0);
+  });
+
+  it('does not warn when callback is a class method', async () => {
+    const uri = 'file:///test/cb_class_method.py';
+    const code = [
+      'class Kamailio:',
+      '    def ksr_failure_manage(self):',
+      '        pass',
+      '',
+      '    def route(self):',
+      '        KSR.tm.t_on_failure("ksr_failure_manage")',
+    ].join('\n');
+    await client.openDocument(uri, code);
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(uri);
+    expect(diags.filter(d => d.code === 'undefined-callback')).toHaveLength(0);
+  });
+
+  it('navigates to class method definition from callback', async () => {
+    const uri = 'file:///test/cb_class_goto.py';
+    const code = [
+      'class Kamailio:',
+      '    def ksr_class_failure_handler(self):',
+      '        pass',
+      '',
+      '    def route(self):',
+      '        KSR.tm.t_on_failure("ksr_class_failure_handler")',
+    ].join('\n');
+    await client.openDocument(uri, code);
+    // line 5: '        KSR.tm.t_on_failure("ksr_class_failure_handler")'
+    // char 33 is inside the callback name
+    const defs = await client.getDefinitions(uri, 5, 33);
+    expect(defs.length).toBeGreaterThan(0);
+    expect(defs[0].range.start.line).toBe(1);
+  });
+
+  it('validates t_on_branch callbacks too', async () => {
+    const uri = 'file:///test/cb_branch_missing.py';
+    await client.openDocument(uri, 'KSR.tm.t_on_branch("nonexistent_branch_handler")');
+    const diags = await client.waitForDiagnostics(uri);
+    expect(diags.some(d =>
+      d.message.includes('nonexistent_branch_handler') && d.code === 'undefined-callback'
+    )).toBe(true);
+  });
+
+  it('navigates from callback string to function definition', async () => {
+    const uri = 'file:///test/cb_goto.py';
+    const code = [
+      'def ksr_failure_manage():',
+      '    pass',
+      '',
+      'KSR.tm.t_on_failure("ksr_failure_manage")',
+    ].join('\n');
+    await client.openDocument(uri, code);
+    // char 25 is inside "ksr_failure_manage" on line 3
+    const defs = await client.getDefinitions(uri, 3, 25);
+    expect(defs.length).toBeGreaterThan(0);
+    expect(defs[0].range.start.line).toBe(0);
+  });
+
+  it('navigates to function definition in another file', async () => {
+    const defUri = 'file:///test/cb_goto_def.py';
+    const useUri = 'file:///test/cb_goto_use.py';
+    await client.openDocument(defUri, [
+      'def ksr_on_branch_auth():',
+      '    pass',
+    ].join('\n'));
+    await client.openDocument(useUri, 'KSR.tm.t_on_branch("ksr_on_branch_auth")');
+    // char 25 is inside "ksr_on_branch_auth" on line 0
+    const defs = await client.getDefinitions(useUri, 0, 25);
+    expect(defs.length).toBeGreaterThan(0);
+    expect(defs[0].uri).toBe(defUri);
+    expect(defs[0].range.start.line).toBe(0);
+  });
+
+  it('suggests function names inside callback string', async () => {
+    const uri = 'file:///test/cb_comp.py';
+    const code = [
+      'def ksr_failure_manage():',
+      '    pass',
+      '',
+      'def ksr_on_branch_auth():',
+      '    pass',
+      '',
+      'KSR.tm.t_on_failure("")',
+    ].join('\n');
+    await client.openDocument(uri, code);
+    // char 21 is between the quotes in t_on_failure("") on line 6
+    const items = await client.getCompletions(uri, 6, 21);
+    expect(items.some(c => c.label === 'ksr_failure_manage')).toBe(true);
+    expect(items.some(c => c.label === 'ksr_on_branch_auth')).toBe(true);
   });
 });

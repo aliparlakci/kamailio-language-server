@@ -38,7 +38,7 @@ export function extractFunctions(tree: Tree, uri: string): ExtractedFunction[] {
   const results: ExtractedFunction[] = [];
   const root = tree.rootNode;
 
-  // Extract top-level function definitions
+  // Extract top-level function definitions and class methods
   for (let i = 0; i < root.namedChildCount; i++) {
     const node = root.namedChild(i)!;
     if (node.type === 'function_definition') {
@@ -48,6 +48,8 @@ export function extractFunctions(tree: Tree, uri: string): ExtractedFunction[] {
       if (funcNode) {
         results.push(extractOneFunction(funcNode, uri));
       }
+    } else if (node.type === 'class_definition') {
+      extractClassMethods(node, uri, results);
     }
   }
 
@@ -70,6 +72,23 @@ export function extractFunctions(tree: Tree, uri: string): ExtractedFunction[] {
   }
 
   return results;
+}
+
+function extractClassMethods(classNode: SyntaxNode, uri: string, results: ExtractedFunction[]): void {
+  const bodyNode = classNode.childForFieldName('body');
+  if (!bodyNode) return;
+
+  for (let i = 0; i < bodyNode.namedChildCount; i++) {
+    const node = bodyNode.namedChild(i)!;
+    if (node.type === 'function_definition') {
+      results.push(extractOneFunction(node, uri));
+    } else if (node.type === 'decorated_definition') {
+      const funcNode = node.namedChildren.find((c) => c.type === 'function_definition');
+      if (funcNode) {
+        results.push(extractOneFunction(funcNode, uri));
+      }
+    }
+  }
 }
 
 function extractOneFunction(funcNode: SyntaxNode, uri: string): ExtractedFunction {

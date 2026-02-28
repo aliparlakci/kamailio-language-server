@@ -1,0 +1,18 @@
+KSR Method Signature Help
+=========================
+
+Show parameter hints (signature help) when typing arguments for KSR methods.
+Many methods have non-obvious parameter types and order.
+
+Examples from usage:
+  KSR.sl.sl_send_reply(200, "Keepalive")       -> (code: int, reason: str)
+  KSR.dispatcher.ds_select_dst_limit(...)       -> (set: int, alg: int, limit: int)
+  KSR.hdr.gete_idx("Reason", idx)              -> (header_name: str, index: int)
+  KSR.tm.t_on_failure("ksr_failure_manage")     -> (callback_name: str)
+  KSR.maxfwd.process_maxfwd(10)                 -> (max_value: int)
+  KSR.dialplan.dp_replace(dpid, match, "$var(dpOut)") -> (dpid: int, match: str, result_pv: str)
+  KSR.statistics.update_stat("invite", 1)       -> (stat_name: str, increment: int)
+
+Implementation: Register a SignatureHelpProvider. Use the KSR KEMI method
+database to provide parameter names, types, and descriptions. Trigger on
+"(" and "," characters.

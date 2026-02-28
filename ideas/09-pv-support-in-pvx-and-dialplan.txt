@@ -1,0 +1,28 @@
+PV Analysis for KSR.pvx and KSR.dialplan Strings
+==================================================
+
+Beyond KSR.pv.*, other modules also accept PV strings as arguments.
+The extension should extract and analyze PVs from these calls too.
+
+KSR.pvx methods:
+  KSR.pvx.shv_get("configHash")           -> shared variable name
+  KSR.pvx.shv_sets("configHash", value)   -> shared variable write
+  KSR.pvx.xavp_child_get("_dsctx_","cnt") -> xavp access
+
+KSR.dialplan methods:
+  KSR.dialplan.dp_replace(dpid, match, "$var(dpOut)") -> PV in 3rd arg
+
+KSR.pv.unset with complex PVs:
+  KSR.pv.unset("$xavp(_dsctx_[*])")
+  KSR.pv.unset("$xavp(_dsdst_[*])")
+
+KSR.pv.gete with complex PVs:
+  KSR.pv.gete("$(T_rpl($ct))")
+  KSR.pv.gete("$xavp(_dsdst_=>attrs)")
+  KSR.pv.gete("$xavp(_dsdst_[n]=>uri)")
+
+Features:
+  1. Track KSR.pvx.shv_get/shv_sets as read/write of shared variables
+  2. Provide completions for shared variable names
+  3. Cross-reference $shv(x) in KSR.pv with shv_get("x") in KSR.pvx
+  4. Support XAVP nested syntax: $xavp(root=>field), $xavp(root[idx])

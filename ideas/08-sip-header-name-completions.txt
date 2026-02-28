@@ -1,0 +1,21 @@
+SIP Header Name Completions for KSR.hdr.*
+==========================================
+
+KSR.hdr.get(), KSR.hdr.is_present(), KSR.hdr.append(), KSR.hdr.remove()
+all take SIP header names. The extension should offer completions for
+standard SIP headers and custom headers found in the workspace.
+
+Examples from usage:
+  KSR.hdr.is_present("Reason")
+  KSR.hdr.remove("Route")
+  KSR.hdr.gete_idx("Reason", idx)
+  KSR.hdr.get(VOICE_HEADER_ACCOUNT_ID)      -- variable reference
+  KSR.hdr.is_present(INFO_HEADER_EARLY_MEDIA) -- variable reference
+
+Features:
+  1. Completions for standard SIP header names: Via, From, To, Call-ID,
+     CSeq, Contact, Route, Record-Route, Reason, Max-Forwards, etc.
+  2. Completions for custom headers found in the workspace (X-* headers
+     defined as constants)
+  3. Hover info linking to RFC documentation for standard headers
+  4. Diagnostics for obviously misspelled header names

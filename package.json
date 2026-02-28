@@ -42,6 +42,38 @@
         }
       }
     },
+    "colors": [
+      {
+        "id": "kamailio.pvTypeColor",
+        "description": "Color for PV type keywords like $var(, $avp( — matches function/method style",
+        "defaults": {
+          "dark": "#dcdcaa",
+          "light": "#795e26",
+          "highContrast": "#dcdcaa",
+          "highContrastLight": "#5e2000"
+        }
+      },
+      {
+        "id": "kamailio.pvNameColor",
+        "description": "Color for PV variable names inside parentheses — matches variable style",
+        "defaults": {
+          "dark": "#9cdcfe",
+          "light": "#001080",
+          "highContrast": "#9cdcfe",
+          "highContrastLight": "#001080"
+        }
+      },
+      {
+        "id": "kamailio.pvBuiltinColor",
+        "description": "Color for built-in bare PVs like $ru, $rU — matches variable style",
+        "defaults": {
+          "dark": "#9cdcfe",
+          "light": "#001080",
+          "highContrast": "#9cdcfe",
+          "highContrastLight": "#001080"
+        }
+      }
+    ],
     "semanticTokenTypes": [
       {
         "id": "kamailioPvType",
@@ -64,23 +96,7 @@
         "id": "kamailioPv",
         "description": "Marks a token as a Kamailio pseudo-variable"
       }
-    ],
-    "configurationDefaults": {
-      "editor.semanticTokenColorCustomizations": {
-        "enabled": true,
-        "rules": {
-          "kamailioPvType": {
-            "foreground": "#4ec9b0"
-          },
-          "kamailioPvName": {
-            "foreground": "#9cdcfe"
-          },
-          "kamailioPvBuiltin": {
-            "foreground": "#9cdcfe"
-          }
-        }
-      }
-    }
+    ]
   },
   "scripts": {
     "compile": "npm run compile:client && npm run compile:server",

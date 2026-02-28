@@ -1,0 +1,21 @@
+Statistics Name Completions and Tracking
+=========================================
+
+KSR.statistics.update_stat() is called 39 times with unique stat names.
+The extension could index all stat names and provide completions and
+cross-reference support.
+
+Examples from usage:
+  KSR.statistics.update_stat("invite", 1)
+  KSR.statistics.update_stat("cancel", 1)
+  KSR.statistics.update_stat("default_route", 1)
+  KSR.statistics.update_stat("disabled_carriers_calls", 1)
+  KSR.statistics.update_stat("reload_success", 1)
+  KSR.statistics.update_stat(Statistics.ON_NET_CALL, 1)
+
+Features:
+  1. Completions: suggest known stat names when typing the first argument
+  2. References: find all places a stat name is used
+  3. Hover: show how many call sites reference a given stat
+  4. Diagnostics: warn on possible typos in stat names (e.g. edit distance
+     to known names)

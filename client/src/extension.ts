@@ -11,16 +11,18 @@ let client: LanguageClient;
 
 // Decoration types for PV highlighting — these render on top of
 // Pylance's string tokens and can't be overridden.
+// Colors are defined as contributed theme colors in package.json so they
+// adapt to the active color theme (dark, light, high-contrast).
 const pvTypeDecoration = vscode.window.createTextEditorDecorationType({
-  color: '#4ec9b0',
+  color: new vscode.ThemeColor('kamailio.pvTypeColor'),
 });
 
 const pvNameDecoration = vscode.window.createTextEditorDecorationType({
-  color: '#9cdcfe',
+  color: new vscode.ThemeColor('kamailio.pvNameColor'),
 });
 
 const pvBuiltinDecoration = vscode.window.createTextEditorDecorationType({
-  color: '#9cdcfe',
+  color: new vscode.ThemeColor('kamailio.pvBuiltinColor'),
 });
 
 interface PvDecorationData {
@@ -65,6 +67,25 @@ export function activate(context: vscode.ExtensionContext) {
       applyDecorations(data);
     });
   });
+
+  // Auto-trigger completions when typing inside $class() in a string.
+  // VS Code disables quick suggestions inside strings by default, so
+  // without this, variable name completions only appear via Ctrl+Space.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      const editor = vscode.window.activeTextEditor;
+      if (!editor || editor.document !== event.document) return;
+      if (event.document.languageId !== 'python') return;
+      if (event.contentChanges.length !== 1) return;
+      if (event.contentChanges[0].text.length !== 1) return;
+
+      const position = editor.selection.active;
+      const before = editor.document.lineAt(position.line).text.substring(0, position.character);
+      if (/\$\w+\([^)"']*$/.test(before) || /\$\w*$/.test(before)) {
+        vscode.commands.executeCommand('editor.action.triggerSuggest');
+      }
+    }),
+  );
 
   context.subscriptions.push(
     pvTypeDecoration,

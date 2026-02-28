@@ -129,6 +129,20 @@ describe('PvAnalyzer - References', () => {
     expect(refs.length).toBe(2); // One in a.py, one in b.py
     expect(refs.map(r => r.uri).sort()).toEqual(['test://a.py', 'test://b.py']);
   });
+
+  it('finds all references for bare PVs across documents', () => {
+    const analyzer = makeAnalyzer();
+    analyzeCode(analyzer, 'test://a.py', 'val = KSR.pv.get("$rU")');
+    const code2 = 'user = KSR.pv.get("$rU")';
+    const tree2 = analyzeCode(analyzer, 'test://b.py', code2);
+    // Position on $rU in file b (character 20 = 'r' in $rU)
+    const refs = analyzer.getReferences(
+      { uri: 'test://b.py', tree: tree2, fullText: code2 },
+      { line: 0, character: 20 }
+    );
+    expect(refs.length).toBe(2);
+    expect(refs.map(r => r.uri).sort()).toEqual(['test://a.py', 'test://b.py']);
+  });
 });
 
 describe('PvAnalyzer - Hover', () => {
