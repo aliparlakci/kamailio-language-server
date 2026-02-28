@@ -54,7 +54,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   client = new LanguageClient(
     'kamailioKemiLanguageServer',
-    'Kamailio KEMI Language Server',
+    'Kamailio Language Server',
     serverOptions,
     clientOptions
   );

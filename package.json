@@ -1,7 +1,7 @@
 {
   "name": "kamailio-kemi-lsp",
-  "displayName": "Kamailio KEMI Language Server",
-  "description": "Language support for Kamailio KEMI Python scripts — pseudo-variable highlighting, completion, diagnostics, and navigation",
+  "displayName": "Kamailio Language Server",
+  "description": "Language support for Kamailio Python scripts — pseudo-variable highlighting, completion, diagnostics, and navigation",
   "version": "0.1.0",
   "publisher": "parlakci",
   "license": "MIT",
@@ -23,12 +23,12 @@
   "contributes": {
     "configuration": {
       "type": "object",
-      "title": "Kamailio KEMI",
+      "title": "Kamailio",
       "properties": {
         "kamailioKemi.enable": {
           "type": "boolean",
           "default": true,
-          "description": "Enable/disable the Kamailio KEMI language server"
+          "description": "Enable/disable the Kamailio language server"
         },
         "kamailioKemi.trace.server": {
           "type": "string",
