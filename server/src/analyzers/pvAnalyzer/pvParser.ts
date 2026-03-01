@@ -24,17 +24,23 @@ export interface ParsedPv {
 }
 
 const SIP_URI_PVS = new Set([
-  'ru', 'rU', 'fu', 'fU', 'tu', 'tU', 'ou', 'oU', 'du', 'su',
+  'ru', 'rU', 'rUl', 'rz', 'fu', 'fU', 'fUl', 'fti', 'tu', 'tU', 'tUl', 'tti', 'tts',
+  'ou', 'oU', 'oUl', 'du', 'su',
   'rd', 'fd', 'td', 'od', 'dd', 'pd', 'ad', 'rp', 'rP',
-  'dp', 'dP', 'op', 'oP', 'fn', 'tn', 'pn',
+  'dp', 'dP', 'ds', 'op', 'oP', 'fn', 'tn', 'pn',
+  'au', 'aU', 'ar', 'adu', 'Au', 'AU',
+  'ai', 'pu', 'pU', 're', 'rt', 'route_uri',
 ]);
 
 const NETWORK_PVS = new Set([
-  'si', 'sp', 'Ri', 'Rp', 'Rn', 'RAi', 'RAp', 'pr', 'proto',
+  'si', 'sp', 'siz', 'su', 'sut', 'sas',
+  'Ri', 'Rp', 'Rn', 'Ru', 'Rut', 'RAi', 'RAp', 'RAu', 'RAut',
+  'pr', 'proto', 'prid', 'conid', 'fs', 'fsn',
 ]);
 
 const MESSAGE_PVS = new Set([
-  'rm', 'rs', 'cl', 'rb', 'ml', 'mb', 'bs', 'ct', 'cT', 'ua',
+  'rm', 'rmid', 'rs', 'rv', 'cl', 'rb', 'ml', 'mb', 'mbu', 'bs',
+  'ct', 'cT', 'ctu', 'cts', 'ua',
   'mi', 'mt', 'cs', 'csb', 'ci', 'ft', 'tt',
 ]);
 
@@ -49,7 +55,7 @@ function categorizePv(pvClass: string): PvCategory {
   if (pvClass === 'T' || pvClass.startsWith('T_')) return 'transaction';
   if (NETWORK_PVS.has(pvClass)) return 'network';
   if (MESSAGE_PVS.has(pvClass)) return 'message';
-  if (pvClass === 'Ts' || pvClass === 'Tf' || pvClass === 'TF' || pvClass === 'TV' || pvClass === 'time' || pvClass === 'utime') return 'time';
+  if (pvClass === 'Ts' || pvClass === 'Tf' || pvClass === 'Tb' || pvClass === 'TS' || pvClass === 'TF' || pvClass === 'TV' || pvClass === 'time' || pvClass === 'utime') return 'time';
   return 'other';
 }
 
@@ -65,8 +71,8 @@ function categorizePv(pvClass: string): PvCategory {
 export function parsePvString(input: string): ParsedPv[] {
   const results: ParsedPv[] = [];
 
-  // Match $(class(inner)[index]), $class(inner), or $bare
-  const pvRegex = /\$\((\w+)\(([^)]*)\)(?:\[([^\]]*)\])?\)|\$(\w+)\(([^)]*)\)|\$([a-zA-Z]\w*)/g;
+  // Match $(class(inner)[index]), $class(inner), $bare, or $?
+  const pvRegex = /\$\((\w+)\(([^)]*)\)(?:\[([^\]]*)\])?\)|\$(\w+)\(([^)]*)\)|\$([a-zA-Z]\w*)|\$(\?)/g;
 
   let match: RegExpExecArray | null;
   while ((match = pvRegex.exec(input)) !== null) {
@@ -88,9 +94,13 @@ export function parsePvString(input: string): ParsedPv[] {
       pvClass = match[4];
       innerName = match[5] || null;
       isBare = false;
-    } else {
+    } else if (match[6] !== undefined) {
       // $bare
       pvClass = match[6];
+      isBare = true;
+    } else {
+      // $? (alias for $rc)
+      pvClass = 'rc';
       isBare = true;
     }
 
