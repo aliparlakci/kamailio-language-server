@@ -21,7 +21,7 @@ import {
 import { extractPvReferences, KSR_PV_METHODS } from './pvExtractor';
 import { parsePvString, pvIdentityKey } from './pvParser';
 import { VariableIndex, PvOccurrence } from './variableIndex';
-import { BUILTIN_PVS, BUILTIN_BARE_PVS, BUILTIN_PV_CLASSES } from '../../data/builtinPvs';
+import { BUILTIN_PVS, BUILTIN_BARE_PVS, BUILTIN_PV_CLASSES, BUILTIN_PV_INNER_NAMES } from '../../data/builtinPvs';
 import { SyntaxNode } from 'web-tree-sitter';
 import type { CallGraphAnalyzer } from '../callGraphAnalyzer/index';
 
@@ -176,6 +176,25 @@ export class PvAnalyzer implements Analyzer {
           message: `Unknown pseudo-variable: ${occ.pv.fullMatch}`,
           source: 'kamailio-pv',
         });
+        continue;
+      }
+
+      // Check for invalid inner names on PV classes with fixed options
+      const knownNames = BUILTIN_PV_INNER_NAMES.get(occ.pv.pvClass);
+      if (knownNames && occ.pv.innerName) {
+        const validNames = knownNames.map(n => n.name);
+        if (!validNames.includes(occ.pv.innerName)) {
+          diags.push({
+            severity: DiagnosticSeverity.Error,
+            range: {
+              start: { line: occ.range.startPosition.row, character: occ.range.startPosition.column },
+              end: { line: occ.range.endPosition.row, character: occ.range.endPosition.column },
+            },
+            message: `Invalid name '${occ.pv.innerName}' for $${occ.pv.pvClass}(). Valid options: ${validNames.join(', ')}`,
+            source: 'kamailio-pv',
+            code: 'invalid-pv-inner-name',
+          });
+        }
       }
     }
 
@@ -545,6 +564,22 @@ export class PvAnalyzer implements Analyzer {
   private getVariableNameCompletions(pvClass: string, replaceRange: Range): CompletionItem[] {
     const items: CompletionItem[] = [];
     const seen = new Set<string>();
+
+    // Offer known builtin inner names for PV classes with fixed options (e.g., $T, $TV)
+    const builtinNames = BUILTIN_PV_INNER_NAMES.get(pvClass);
+    if (builtinNames) {
+      for (const entry of builtinNames) {
+        items.push({
+          label: entry.name,
+          kind: CompletionItemKind.EnumMember,
+          detail: entry.description,
+          filterText: entry.name,
+          sortText: `0${entry.name}`,
+          textEdit: TextEdit.replace(replaceRange, entry.name),
+        });
+        seen.add(entry.name);
+      }
+    }
 
     for (const index of this.indices.values()) {
       for (const key of index.getAllIdentities()) {

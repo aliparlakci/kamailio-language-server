@@ -41,9 +41,46 @@ describe('PvAnalyzer - Diagnostics', () => {
     expect(unknownDiag!.severity).toBe(1); // DiagnosticSeverity.Error = 1
   });
 
+  it('reports invalid inner name for $T()', () => {
+    const analyzer = makeAnalyzer();
+    const code = 'KSR.pv.get("$T(bogus)")';
+    const tree = analyzeCode(analyzer, 'test://a.py', code);
+    const diags = analyzer.getDiagnostics({ uri: 'test://a.py', tree, fullText: code });
+    const invalidDiag = diags.find(d => d.code === 'invalid-pv-inner-name');
+    expect(invalidDiag).toBeDefined();
+    expect(invalidDiag!.message).toContain('bogus');
+    expect(invalidDiag!.message).toContain('reply_code');
+  });
+
+  it('reports invalid inner name for $TV()', () => {
+    const analyzer = makeAnalyzer();
+    const code = 'KSR.pv.get("$TV(x)")';
+    const tree = analyzeCode(analyzer, 'test://a.py', code);
+    const diags = analyzer.getDiagnostics({ uri: 'test://a.py', tree, fullText: code });
+    const invalidDiag = diags.find(d => d.code === 'invalid-pv-inner-name');
+    expect(invalidDiag).toBeDefined();
+    expect(invalidDiag!.message).toContain('x');
+  });
+
   it('does not warn on known bare PVs', () => {
     const analyzer = makeAnalyzer();
     const code = 'KSR.pv.get("$ru")';
+    const tree = analyzeCode(analyzer, 'test://a.py', code);
+    const diags = analyzer.getDiagnostics({ uri: 'test://a.py', tree, fullText: code });
+    expect(diags).toHaveLength(0);
+  });
+
+  it('does not warn on transaction PVs like $T(reply_code)', () => {
+    const analyzer = makeAnalyzer();
+    const code = 'KSR.pv.get("$T(reply_code)")';
+    const tree = analyzeCode(analyzer, 'test://a.py', code);
+    const diags = analyzer.getDiagnostics({ uri: 'test://a.py', tree, fullText: code });
+    expect(diags).toHaveLength(0);
+  });
+
+  it('does not warn on timestamp PVs like $TV(s)', () => {
+    const analyzer = makeAnalyzer();
+    const code = 'KSR.pv.get("$TV(s)")';
     const tree = analyzeCode(analyzer, 'test://a.py', code);
     const diags = analyzer.getDiagnostics({ uri: 'test://a.py', tree, fullText: code });
     expect(diags).toHaveLength(0);
@@ -230,6 +267,32 @@ describe('PvAnalyzer - Completions', () => {
     );
     expect(completions.some(c => c.label === 'caller')).toBe(true);
     expect(completions.some(c => c.label === 'counter')).toBe(true);
+  });
+
+  it('returns builtin inner name completions inside $T()', () => {
+    const analyzer = makeAnalyzer();
+    const code = 'KSR.pv.get("$T()")';
+    const tree = analyzeCode(analyzer, 'test://a.py', code);
+    const completions = analyzer.getCompletions(
+      { uri: 'test://a.py', tree, fullText: code },
+      { line: 0, character: 15 } // Between the parens in $T()
+    );
+    expect(completions.some(c => c.label === 'reply_code')).toBe(true);
+    expect(completions.some(c => c.label === 'reply_reason')).toBe(true);
+  });
+
+  it('returns builtin inner name completions inside $TV()', () => {
+    const analyzer = makeAnalyzer();
+    const code = 'KSR.pv.get("$TV()")';
+    const tree = analyzeCode(analyzer, 'test://a.py', code);
+    const completions = analyzer.getCompletions(
+      { uri: 'test://a.py', tree, fullText: code },
+      { line: 0, character: 16 } // Between the parens in $TV()
+    );
+    expect(completions.some(c => c.label === 's')).toBe(true);
+    expect(completions.some(c => c.label === 'u')).toBe(true);
+    expect(completions.some(c => c.label === 'sn')).toBe(true);
+    expect(completions.some(c => c.label === 'un')).toBe(true);
   });
 
   it('returns empty completions outside KSR.pv strings', () => {

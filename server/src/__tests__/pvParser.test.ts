@@ -59,6 +59,24 @@ describe('parsePvString', () => {
     }
   });
 
+  it('parses transaction PVs like $T(reply_code)', () => {
+    const result = parsePvString('$T(reply_code)');
+    expect(result).toHaveLength(1);
+    expect(result[0].pvClass).toBe('T');
+    expect(result[0].innerName).toBe('reply_code');
+    expect(result[0].isBare).toBe(false);
+    expect(result[0].category).toBe('transaction');
+  });
+
+  it('parses timestamp value PVs like $TV(s)', () => {
+    const result = parsePvString('$TV(s)');
+    expect(result).toHaveLength(1);
+    expect(result[0].pvClass).toBe('TV');
+    expect(result[0].innerName).toBe('s');
+    expect(result[0].isBare).toBe(false);
+    expect(result[0].category).toBe('time');
+  });
+
   it('returns empty for non-PV strings', () => {
     expect(parsePvString('hello world')).toHaveLength(0);
     expect(parsePvString('')).toHaveLength(0);

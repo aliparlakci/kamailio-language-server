@@ -66,9 +66,36 @@ export const BUILTIN_PVS: BuiltinPvDef[] = [
   { pvClass: 'hdrc', template: '$hdrc(name)', description: 'SIP header count', category: 'sip_header', isBare: false, isReadOnly: true },
   { pvClass: 'sht', template: '$sht(table=>key)', description: 'Hash table entry (htable module)', category: 'htable', isBare: false, isReadOnly: false },
   { pvClass: 'dlg_var', template: '$dlg_var(name)', description: 'Dialog variable', category: 'dialog_var', isBare: false, isReadOnly: false },
+  // Transaction
+  { pvClass: 'T', template: '$T(name)', description: 'Transaction pseudo-variable (e.g., reply_code, reply_reason)', category: 'transaction', isBare: false, isReadOnly: true },
+  { pvClass: 'TV', template: '$TV(name)', description: 'Timestamp value (s=seconds, u=microseconds, sn/un=with nanoseconds)', category: 'time', isBare: false, isReadOnly: true },
 ];
 
 export const BUILTIN_PV_CLASSES = new Set(BUILTIN_PVS.map((pv) => pv.pvClass));
+
+/** Known inner names for builtin parenthesized PV classes with fixed options. */
+export const BUILTIN_PV_INNER_NAMES: Map<string, Array<{ name: string; description: string }>> = new Map([
+  ['T', [
+    { name: 'id_index', description: 'Internal transaction index ($null if no transaction)' },
+    { name: 'id_label', description: 'Internal transaction label ($null if no transaction)' },
+    { name: 'id_index_n', description: 'Internal transaction index (creates transaction if needed)' },
+    { name: 'id_label_n', description: 'Internal transaction label (creates transaction if needed)' },
+    { name: 'reply_code', description: 'Transaction reply status code' },
+    { name: 'reply_reason', description: 'Transaction reply reason phrase' },
+    { name: 'reply_last', description: 'Most recently received response code' },
+    { name: 'reply_type', description: '1 for locally generated replies, 0 otherwise' },
+    { name: 'branch_index', description: 'Current branch index' },
+    { name: 'ruid', description: 'Internal location ruid field for current branch' },
+  ]],
+  ['TV', [
+    { name: 's', description: 'Seconds since epoch (cached per SIP message)' },
+    { name: 'u', description: 'Microseconds since epoch (cached per SIP message)' },
+    { name: 'sn', description: 'Seconds at current moment (not cached)' },
+    { name: 'un', description: 'Microseconds corresponding to $TV(sn) moment' },
+    { name: 'Sn', description: 'String seconds.microseconds at current moment (not cached)' },
+    { name: 'Sm', description: 'String monotonic counter (always increases)' },
+  ]],
+]);
 
 export const BUILTIN_BARE_PVS = new Map(
   BUILTIN_PVS.filter((pv) => pv.isBare).map((pv) => [pv.pvClass, pv])

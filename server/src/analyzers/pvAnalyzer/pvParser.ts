@@ -49,7 +49,7 @@ function categorizePv(pvClass: string): PvCategory {
   if (pvClass === 'T' || pvClass.startsWith('T_')) return 'transaction';
   if (NETWORK_PVS.has(pvClass)) return 'network';
   if (MESSAGE_PVS.has(pvClass)) return 'message';
-  if (pvClass === 'Ts' || pvClass === 'Tf' || pvClass === 'TF' || pvClass === 'time' || pvClass === 'utime') return 'time';
+  if (pvClass === 'Ts' || pvClass === 'Tf' || pvClass === 'TF' || pvClass === 'TV' || pvClass === 'time' || pvClass === 'utime') return 'time';
   return 'other';
 }
 

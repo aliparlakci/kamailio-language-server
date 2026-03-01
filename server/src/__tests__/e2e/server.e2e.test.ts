@@ -393,6 +393,71 @@ describe('E2E: Multiple PV types across files', () => {
   });
 });
 
+describe('E2E: Transaction and timestamp PVs ($T, $TV)', () => {
+  it('does not warn for valid $T(reply_code)', async () => {
+    const uri = 'file:///test/t_valid.py';
+    await client.openDocument(uri, 'KSR.pv.get("$T(reply_code)")');
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(uri);
+    expect(diags).toHaveLength(0);
+  });
+
+  it('does not warn for valid $TV(s)', async () => {
+    const uri = 'file:///test/tv_valid.py';
+    await client.openDocument(uri, 'KSR.pv.get("$TV(s)")');
+    await new Promise(r => setTimeout(r, 500));
+    const diags = client.getDiagnostics(uri);
+    expect(diags).toHaveLength(0);
+  });
+
+  it('warns for invalid $T() inner name', async () => {
+    const uri = 'file:///test/t_invalid.py';
+    await client.openDocument(uri, 'KSR.pv.get("$T(bogus)")');
+    const diags = await client.waitForDiagnostics(uri);
+    const d = diags.find(d => d.code === 'invalid-pv-inner-name');
+    expect(d).toBeDefined();
+    expect(d!.message).toContain('bogus');
+    expect(d!.message).toContain('reply_code');
+  });
+
+  it('warns for invalid $TV() inner name', async () => {
+    const uri = 'file:///test/tv_invalid.py';
+    await client.openDocument(uri, 'KSR.pv.get("$TV(x)")');
+    const diags = await client.waitForDiagnostics(uri);
+    const d = diags.find(d => d.code === 'invalid-pv-inner-name');
+    expect(d).toBeDefined();
+    expect(d!.message).toContain('x');
+  });
+
+  it('completes inner names inside $T()', async () => {
+    const uri = 'file:///test/t_comp.py';
+    await client.openDocument(uri, 'KSR.pv.get("$T()")');
+    const items = await client.getCompletions(uri, 0, 15);
+    expect(items.some(c => c.label === 'reply_code')).toBe(true);
+    expect(items.some(c => c.label === 'reply_reason')).toBe(true);
+    expect(items.some(c => c.label === 'branch_index')).toBe(true);
+  });
+
+  it('completes inner names inside $TV()', async () => {
+    const uri = 'file:///test/tv_comp.py';
+    await client.openDocument(uri, 'KSR.pv.get("$TV()")');
+    const items = await client.getCompletions(uri, 0, 16);
+    expect(items.some(c => c.label === 's')).toBe(true);
+    expect(items.some(c => c.label === 'u')).toBe(true);
+    expect(items.some(c => c.label === 'sn')).toBe(true);
+    expect(items.some(c => c.label === 'un')).toBe(true);
+  });
+
+  it('returns hover for $T(reply_code)', async () => {
+    const uri = 'file:///test/t_hover.py';
+    await client.openDocument(uri, 'KSR.pv.get("$T(reply_code)")');
+    const hover = await client.getHover(uri, 0, 15);
+    expect(hover).not.toBeNull();
+    const content = (hover!.contents as any).value;
+    expect(content).toContain('$T(reply_code)');
+  });
+});
+
 describe('E2E: Workspace indexing (files on disk, not opened in editor)', () => {
   let wsClient: TestLspClient;
   let tmpDir: string;
